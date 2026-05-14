@@ -1,8 +1,6 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
-import busboy from 'busboy';
 import path from 'path';
-import { Readable } from 'stream';
 import { ingestionService } from '../services/ingestion.service';
 import { storageService } from '../services/storage.service';
 import { config } from '../config';
@@ -79,104 +77,6 @@ export const ingestionController = {
       const e = err as Error;
       res.status(500).json({ error: e.message });
     }
-  },
-
-  /**
-   * POST /ingestion/upload
-   * Multipart form-data fields:
-   *   file     — the ONIX XML file (required)
-   *   key      — custom R2 object key (optional; defaults to onixPrefix + original filename)
-   *   trigger  — "true" to automatically start ingestion after upload (optional)
-   */
-  async uploadFile(req: Request, res: Response): Promise<void> {
-    const bb = busboy({
-      headers: req.headers,
-      limits: { files: 1 }, // one file per request
-    });
-
-    let fileKey: string | null = null;
-    let customKey: string | null = null;
-    let autoTrigger = false;
-    let uploadError: Error | null = null;
-    let uploadDone = false;
-
-    // Collect non-file fields first
-    bb.on('field', (name, value) => {
-      if (name === 'key') customKey = value.trim();
-      if (name === 'trigger') autoTrigger = value === 'true';
-    });
-
-    bb.on('file', (_fieldname, fileStream, info) => {
-      const { filename, mimeType } = info;
-
-      if (!filename.endsWith('.xml')) {
-        fileStream.resume(); // drain and discard
-        uploadError = new Error('Only .xml files are accepted');
-        return;
-      }
-
-      const ext = path.extname(filename);
-      const base = path.basename(filename, ext)
-        .toLowerCase()
-        .replace(/\s+/g, '_')          // spaces → underscores
-        .replace(/[^a-z0-9_-]/g, ''); // strip any remaining special chars
-      const timestamp = Date.now();
-      const sanitisedFilename = `${base}_${timestamp}${ext}`;
-
-      const resolvedKey =
-        customKey ?? `${config.r2.onixPrefix}${sanitisedFilename}`;
-
-      fileKey = resolvedKey;
-
-      storageService
-        .uploadStream(fileStream as unknown as Readable, resolvedKey, mimeType)
-        .then(() => {
-          uploadDone = true;
-        })
-        .catch((err: Error) => {
-          uploadError = err;
-        });
-    });
-
-    bb.on('finish', async () => {
-      // Wait for the in-flight upload promise to settle
-      while (!uploadDone && !uploadError) {
-        await new Promise((r) => setTimeout(r, 50));
-      }
-
-      if (uploadError) {
-        res.status(500).json({ error: uploadError.message });
-        return;
-      }
-
-      if (!fileKey) {
-        res.status(400).json({ error: 'No file field found in the request' });
-        return;
-      }
-
-      if (autoTrigger) {
-        try {
-          const job = await ingestionService.triggerIngestion(fileKey);
-          res.status(202).json({
-            message: 'File uploaded and ingestion enqueued',
-            fileKey,
-            jobId: job.jobId,
-            bullJobId: job.bullJobId,
-          });
-        } catch (err: unknown) {
-          const e = err as Error;
-          res.status(500).json({ error: `Upload succeeded but trigger failed: ${e.message}` });
-        }
-      } else {
-        res.status(200).json({ message: 'File uploaded successfully', fileKey });
-      }
-    });
-
-    bb.on('error', (err: Error) => {
-      res.status(400).json({ error: err.message });
-    });
-
-    req.pipe(bb);
   },
 
   async listUnprocessed(_req: Request, res: Response): Promise<void> {

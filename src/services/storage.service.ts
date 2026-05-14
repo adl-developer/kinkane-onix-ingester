@@ -5,7 +5,6 @@ import {
   HeadObjectCommand,
   PutObjectCommand,
 } from '@aws-sdk/client-s3';
-import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Readable } from 'stream';
 import { config } from '../config';
@@ -64,33 +63,6 @@ class StorageService {
     } while (continuationToken);
 
     return results;
-  }
-
-  /**
-   * Streams a readable (e.g. from busboy) directly into R2 using multipart upload.
-   * Safe for files of any size — no disk buffering.
-   * Returns the final R2 key.
-   */
-  async uploadStream(
-    fileStream: Readable,
-    fileKey: string,
-    contentType = 'application/xml',
-  ): Promise<string> {
-    const upload = new Upload({
-      client: this.s3,
-      params: {
-        Bucket: this.bucket,
-        Key: fileKey,
-        Body: fileStream,
-        ContentType: contentType,
-      },
-      // 50 MB parts — R2 minimum is 5 MB, max parts is 10,000
-      partSize: 50 * 1024 * 1024,
-      queueSize: 3, // concurrent part uploads
-    });
-
-    await upload.done();
-    return fileKey;
   }
 
   /**

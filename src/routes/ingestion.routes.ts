@@ -8,13 +8,6 @@ const router = Router();
 router.use(requireAdminToken);
 
 /**
- * POST /ingestion/upload
- * Multipart form-data: file=<onix.xml> [key=<r2-key>] [trigger=true]
- * Streams the file directly to R2. Pass trigger=true to also start ingestion.
- */
-router.post('/upload', ingestionController.uploadFile);
-
-/**
  * POST /ingestion/presign
  * Body: { filename: "feed.xml", key?: "onix/feed.xml", expiresIn?: 14400 }
  * Returns a presigned PUT URL valid for up to 4 hours.
