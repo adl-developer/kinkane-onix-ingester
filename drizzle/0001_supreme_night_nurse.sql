@@ -1,0 +1,1 @@
+ALTER TABLE "ingestion_chunks" ADD COLUMN "data" jsonb;

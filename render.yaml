@@ -1,0 +1,61 @@
+services:
+  - type: web
+    name: onix-ingester
+    runtime: node
+    plan: starter
+    buildCommand: npm ci && npm run build
+    preDeployCommand: node dist/db/install-extensions.js && npm run db:migrate && node dist/db/init.js
+    startCommand: node dist/server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        fromDatabase:
+          name: kinkane-db
+          property: connectionString
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: kinkane-redis
+          property: connectionString
+
+      # Set these manually in the Render dashboard (sensitive values)
+      - key: R2_ACCOUNT_ID
+        sync: false
+      - key: R2_ACCESS_KEY_ID
+        sync: false
+      - key: R2_SECRET_ACCESS_KEY
+        sync: false
+      - key: R2_BUCKET_NAME
+        sync: false
+      - key: R2_ENDPOINT
+        sync: false
+      - key: R2_ONIX_PREFIX
+        value: onix/
+      - key: GEMINI_API_KEY
+        sync: false
+      - key: GEMINI_EMBEDDING_MODEL
+        value: text-embedding-004
+      - key: GEMINI_FLASH_MODEL
+        value: gemini-2.5-flash-lite
+      - key: ADMIN_SECRET
+        sync: false
+      - key: JWT_SECRET
+        sync: false
+      - key: CHUNK_SIZE
+        value: "500"
+      - key: EMBEDDING_BATCH_SIZE
+        value: "100"
+      - key: R2_POLL_CRON
+        value: "0 2 * * *"
+
+databases:
+  - name: kinkane-db
+    plan: starter
+    databaseName: kinkane
+    user: kinkane
+
+  - type: redis
+    name: kinkane-redis
+    plan: starter
+    maxmemoryPolicy: noeviction  # BullMQ requires this — never evict queue data
