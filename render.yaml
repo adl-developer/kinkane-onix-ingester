@@ -4,7 +4,6 @@ services:
     runtime: node
     plan: starter
     buildCommand: npm ci && npm run build
-    preDeployCommand: node dist/db/install-extensions.js && npm run db:migrate && node dist/db/init.js
     startCommand: node dist/server.js
     envVars:
       - key: NODE_ENV

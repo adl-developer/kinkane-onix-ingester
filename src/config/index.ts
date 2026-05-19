@@ -30,6 +30,12 @@ const envSchema = z.object({
   EMBEDDING_BATCH_DELAY_MS: z.coerce.number().default(200),
 
   R2_POLL_CRON: z.string().default('0 2 * * *'),
+  COVER_FETCH_CRON: z.string().default('0 3 * * *'),
+
+  // Optional — cover fetching is skipped if not set
+  GOOGLE_BOOKS_API_KEY: z.string().optional(),
+  COVER_FETCH_BATCH_SIZE: z.coerce.number().default(50),
+  COVER_FETCH_DELAY_MS: z.coerce.number().default(200),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -72,8 +78,14 @@ export const config = {
     embeddingBatchSize: env.EMBEDDING_BATCH_SIZE,
     embeddingBatchDelayMs: env.EMBEDDING_BATCH_DELAY_MS,
   },
+  googleBooks: {
+    apiKey: env.GOOGLE_BOOKS_API_KEY,
+  },
   cron: {
     r2PollSchedule: env.R2_POLL_CRON,
+    coverFetchSchedule: env.COVER_FETCH_CRON,
+    coverFetchBatchSize: env.COVER_FETCH_BATCH_SIZE,
+    coverFetchDelayMs: env.COVER_FETCH_DELAY_MS,
   },
 } as const;
 

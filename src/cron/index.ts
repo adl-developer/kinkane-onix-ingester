@@ -1,16 +1,17 @@
 import cron from 'node-cron';
 import { config } from '../config';
 import { ingestionService } from '../services/ingestion.service';
+import { coverService } from '../services/cover.service';
 import { logger } from '../lib/logger';
 
 export function startCron(): void {
-  const schedule = config.cron.r2PollSchedule;
-
-  if (!cron.validate(schedule)) {
-    throw new Error(`Invalid cron schedule: ${schedule}`);
+  // ── R2 poll ───────────────────────────────────────────────────────────────
+  const r2Schedule = config.cron.r2PollSchedule;
+  if (!cron.validate(r2Schedule)) {
+    throw new Error(`Invalid cron schedule: ${r2Schedule}`);
   }
 
-  cron.schedule(schedule, async () => {
+  cron.schedule(r2Schedule, async () => {
     logger.info('Polling R2 for new ONIX files');
 
     try {
@@ -32,5 +33,24 @@ export function startCron(): void {
     }
   });
 
-  logger.info('R2 poll scheduled', { schedule });
+  logger.info('R2 poll scheduled', { schedule: r2Schedule });
+
+  // ── Cover fetch ───────────────────────────────────────────────────────────
+  const coverSchedule = config.cron.coverFetchSchedule;
+  if (!cron.validate(coverSchedule)) {
+    throw new Error(`Invalid cover fetch cron schedule: ${coverSchedule}`);
+  }
+
+  cron.schedule(coverSchedule, async () => {
+    logger.info('Starting cover fetch cron');
+    try {
+      await coverService.fetchMissingCovers();
+    } catch (err) {
+      logger.error('Cover fetch cron failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  logger.info('Cover fetch scheduled', { schedule: coverSchedule });
 }
