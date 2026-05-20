@@ -17,6 +17,7 @@ const envSchema = z.object({
   R2_BUCKET_NAME: z.string().min(1),
   R2_ENDPOINT: z.string().url(),
   R2_ONIX_PREFIX: z.string().default('onix/'),
+  R2_PUBLIC_URL: z.string().url(),
 
   GEMINI_API_KEY: z.string().min(1),
   GEMINI_EMBEDDING_MODEL: z.string().default('text-embedding-004'),
@@ -63,6 +64,7 @@ export const config = {
     bucketName: env.R2_BUCKET_NAME,
     endpoint: env.R2_ENDPOINT,
     onixPrefix: env.R2_ONIX_PREFIX,
+    publicUrl: env.R2_PUBLIC_URL,
   },
   gemini: {
     apiKey: env.GEMINI_API_KEY,
