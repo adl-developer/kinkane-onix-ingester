@@ -89,6 +89,20 @@ class StorageService {
       return false;
     }
   }
+
+  /**
+   * Uploads a raw buffer to R2 and returns the R2 key.
+   * Use this for cover images fetched from external sources.
+   */
+  async uploadBuffer(key: string, buffer: Buffer, contentType: string): Promise<void> {
+    const command = new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      Body: buffer,
+      ContentType: contentType,
+    });
+    await this.s3.send(command);
+  }
 }
 
 export const storageService = new StorageService();

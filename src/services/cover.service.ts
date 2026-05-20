@@ -3,6 +3,7 @@ import { db } from '../db';
 import { books, bookContributors } from '../db/schema';
 import { config } from '../config';
 import { logger } from '../lib/logger';
+import { storageService } from './storage.service';
 
 interface GoogleBooksResponse {
   items?: Array<{
@@ -16,6 +17,55 @@ interface GoogleBooksResponse {
 }
 
 const THIRTY_DAYS_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Returns the highest-resolution Google Books cover URL for a given thumbnail URL. */
+function buildHighResUrl(thumbnail: string): string {
+  const u = new URL(thumbnail);
+  u.protocol = 'https:';
+  u.searchParams.set('zoom', '5');
+  u.searchParams.set('fife', 'w800');
+  u.searchParams.delete('edge');
+  return u.toString();
+}
+
+/**
+ * Extracts the Google Books volume ID from an image URL.
+ * Used as the R2 key suffix when no ISBN13 is available.
+ */
+function extractVolumeId(thumbnailUrl: string): string | null {
+  const match = thumbnailUrl.match(/[?&]id=([^&]+)/);
+  return match ? match[1] : null;
+}
+
+/**
+ * Downloads the cover image from Google Books and uploads it to R2.
+ * Returns the stable R2 public URL, or null if the download/upload fails.
+ */
+async function uploadCoverToR2(
+  highResUrl: string,
+  isbn13: string | null,
+  publicBaseUrl: string,
+): Promise<string | null> {
+  const imageResponse = await fetch(highResUrl);
+  if (!imageResponse.ok) {
+    throw new Error(`Cover image download failed with ${imageResponse.status}`);
+  }
+
+  const buffer = Buffer.from(await imageResponse.arrayBuffer());
+  const contentType = imageResponse.headers.get('content-type') ?? 'image/jpeg';
+  const ext = contentType.includes('png') ? 'png' : 'jpg';
+
+  // Prefer ISBN13 as the key; fall back to the Google Books volume ID
+  const keyId = isbn13 ?? extractVolumeId(highResUrl);
+  if (!keyId) {
+    throw new Error('Cannot derive a stable R2 key: no ISBN13 and no volume ID in URL');
+  }
+
+  const key = `covers/${keyId}.${ext}`;
+  await storageService.uploadBuffer(key, buffer, contentType);
+
+  return `${publicBaseUrl.replace(/\/$/, '')}/${key}`;
+}
 
 async function fetchFromGoogleBooks(
   isbn13: string | null,
@@ -52,8 +102,12 @@ async function fetchFromGoogleBooks(
 
   if (!thumbnail) return null;
 
-  // Upgrade to HTTPS and remove the page-curl rendering effect
-  return thumbnail.replace('http://', 'https://').replace('&edge=curl', '');
+  const highResUrl = buildHighResUrl(thumbnail);
+
+  // If R2 is configured, download the image and re-host it so we own the URL.
+  // Otherwise fall back to the upgraded Google Books URL.
+  const publicBaseUrl = config.r2.publicUrl;
+  return uploadCoverToR2(highResUrl, isbn13, publicBaseUrl);
 }
 
 export const coverService = {
