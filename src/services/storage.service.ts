@@ -4,6 +4,7 @@ import {
   ListObjectsV2Command,
   HeadObjectCommand,
   PutObjectCommand,
+  DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Readable } from 'stream';
@@ -102,6 +103,42 @@ class StorageService {
       ContentType: contentType,
     });
     await this.s3.send(command);
+  }
+
+  /**
+   * Serialises a value to JSON and uploads it to R2.
+   * Used to store parsed ONIX chunk payloads out of PostgreSQL.
+   */
+  async uploadJson(key: string, value: unknown): Promise<void> {
+    const command = new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      Body: JSON.stringify(value),
+      ContentType: 'application/json',
+    });
+    await this.s3.send(command);
+  }
+
+  /**
+   * Downloads and parses a JSON object previously written by uploadJson.
+   */
+  async getJson<T>(key: string): Promise<T> {
+    const command = new GetObjectCommand({ Bucket: this.bucket, Key: key });
+    const response = await this.s3.send(command);
+
+    if (!response.Body) {
+      throw new Error(`Empty response body for key: ${key}`);
+    }
+
+    const text = await response.Body.transformToString('utf-8');
+    return JSON.parse(text) as T;
+  }
+
+  /**
+   * Deletes a single R2 object. Non-fatal if the key doesn't exist.
+   */
+  async deleteObject(key: string): Promise<void> {
+    await this.s3.send(new DeleteObjectCommand({ Bucket: this.bucket, Key: key }));
   }
 }
 

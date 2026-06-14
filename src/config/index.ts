@@ -26,7 +26,7 @@ const envSchema = z.object({
   ADMIN_SECRET: z.string().min(16),
   JWT_SECRET: z.string().min(16),
 
-  CHUNK_SIZE: z.coerce.number().default(500),
+  CHUNK_SIZE: z.coerce.number().default(150),
   EMBEDDING_BATCH_SIZE: z.coerce.number().default(100),
   EMBEDDING_BATCH_DELAY_MS: z.coerce.number().default(200),
 
