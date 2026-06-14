@@ -1,7 +1,7 @@
 import jwt from 'jsonwebtoken';
 import { config } from '../config';
 
-const TOKEN_TTL_SECONDS = 30 * 60; // 30 minutes
+const TOKEN_TTL_SECONDS = 8 * 60 * 60; // 8 hours — long enough to monitor large ONIX ingestion jobs
 
 export interface AdminTokenPayload {
   role: 'admin';

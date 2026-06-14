@@ -1,4 +1,5 @@
 import express, { Request, Response, NextFunction } from 'express';
+import helmet from 'helmet';
 import { requireAdminToken } from './middleware/auth.middleware';
 import { bullBoardRouter } from './queue/board';
 import apiRoutes from './routes';
@@ -6,8 +7,10 @@ import { logger } from './lib/logger';
 
 const app = express();
 
-app.use(express.json());
-app.use(express.urlencoded({ extended: false }));
+app.set('trust proxy', 1);
+app.use(helmet());
+app.use(express.json({ limit: '10mb' })); // ONIX payloads via URL reference, not body
+app.use(express.urlencoded({ extended: false, limit: '10mb' }));
 
 // Bull Board UI — admin JWT required
 app.use('/bull-board', requireAdminToken, bullBoardRouter);
