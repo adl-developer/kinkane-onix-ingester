@@ -14,6 +14,7 @@ import {
   ingestionChunks,
 } from '../db/schema';
 import { embeddingService } from '../services/embedding.service';
+import { storageService } from '../services/storage.service';
 import { OnixProduct } from '../types/onix';
 import { ChunkJobData, ChunkJobResult } from '../types/queue';
 
@@ -162,17 +163,18 @@ async function processChunkJob(job: Job<ChunkJobData>): Promise<ChunkJobResult> 
   let processedBooks = 0;
   let failedBooks = 0;
 
-  // Read book data from PostgreSQL — not from the BullMQ payload
+  // Fetch the R2 key for this chunk's payload
   const [chunkRow] = await db
-    .select({ data: ingestionChunks.data })
+    .select({ dataKey: ingestionChunks.dataKey })
     .from(ingestionChunks)
     .where(eq(ingestionChunks.id, chunkId));
 
-  if (!chunkRow?.data) {
-    throw new Error(`No data found for chunk ${chunkId} — it may have already been processed`);
+  if (!chunkRow?.dataKey) {
+    throw new Error(`No R2 data key found for chunk ${chunkId} — it may have already been processed`);
   }
 
-  const onixBooks = chunkRow.data as OnixProduct[];
+  // Download the parsed book payload from R2
+  const onixBooks = await storageService.getJson<OnixProduct[]>(chunkRow.dataKey);
 
   await db
     .update(ingestionChunks)
@@ -241,13 +243,31 @@ async function processChunkJob(job: Job<ChunkJobData>): Promise<ChunkJobResult> 
 
   await job.updateProgress(100);
 
-  // 3. Clear the book data now that it's been processed (frees DB space)
+  const chunkStatus = failedBooks === onixBooks.length ? 'failed' : 'completed';
+
+  // 3. On success, delete the R2 payload file — it's no longer needed and
+  //    would otherwise accumulate indefinitely. On failure, preserve it so
+  //    operators can inspect the raw data that caused the failure.
+  if (chunkStatus === 'completed') {
+    try {
+      await storageService.deleteObject(chunkRow.dataKey);
+    } catch (err) {
+      logger.warn('Failed to delete chunk R2 file after successful processing', {
+        worker: 'chunk',
+        chunkId,
+        dataKey: chunkRow.dataKey,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   await db
     .update(ingestionChunks)
     .set({
-      status: failedBooks === onixBooks.length ? 'failed' : 'completed',
+      status: chunkStatus,
       processedBooks,
-      data: null,
+      // Null out the key on success so it's clear the file no longer exists in R2
+      dataKey: chunkStatus === 'completed' ? null : chunkRow.dataKey,
       updatedAt: new Date(),
     })
     .where(eq(ingestionChunks.id, chunkId));
@@ -310,9 +330,11 @@ export function startChunkWorker(concurrency = 5): Worker<ChunkJobData, ChunkJob
     const { chunkId, ingestionJobId } = job.data;
 
     try {
+      // dataKey is intentionally left intact on failure so the R2 payload
+      // is available for debugging. The 30-day cleanup cron will remove it.
       await db
         .update(ingestionChunks)
-        .set({ status: 'failed', errorMessage: err.message, data: null, updatedAt: new Date() })
+        .set({ status: 'failed', errorMessage: err.message, updatedAt: new Date() })
         .where(eq(ingestionChunks.id, chunkId));
 
       await db

@@ -8,6 +8,7 @@ import { parseOnixStream } from '../services/parser.service';
 import { config } from '../config';
 import { logger } from '../lib/logger';
 import { FileJobData, FileJobResult } from '../types/queue';
+import type { OnixProduct } from '../types/onix';
 
 async function processFileJob(job: Job<FileJobData>): Promise<FileJobResult> {
   const { ingestionJobId, fileKey } = job.data;
@@ -24,7 +25,12 @@ async function processFileJob(job: Job<FileJobData>): Promise<FileJobResult> {
     const stream = await storageService.getFileStream(fileKey);
 
     for await (const batch of parseOnixStream(stream, config.ingestion.chunkSize)) {
-      // Store book data in PostgreSQL — keeps Redis payload tiny (~100 bytes vs ~4 MB)
+      // Write the parsed book payload to R2 — keeps PostgreSQL rows lightweight
+      // and avoids multi-MB JSONB columns. The chunk worker fetches from R2,
+      // processes the books, then deletes the R2 file on success.
+      const dataKey = `chunks/${ingestionJobId}/${chunkIndex}.json`;
+      await storageService.uploadJson(dataKey, batch as unknown as OnixProduct[]);
+
       const [chunk] = await db
         .insert(ingestionChunks)
         .values({
@@ -32,7 +38,7 @@ async function processFileJob(job: Job<FileJobData>): Promise<FileJobResult> {
           chunkIndex,
           bookCount: batch.length,
           status: 'pending',
-          data: batch,
+          dataKey,
         })
         .returning({ id: ingestionChunks.id });
 
