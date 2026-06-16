@@ -27,8 +27,8 @@ const envSchema = z.object({
   JWT_SECRET: z.string().min(16),
 
   CHUNK_SIZE: z.coerce.number().default(150),
-  EMBEDDING_BATCH_SIZE: z.coerce.number().default(100),
-  EMBEDDING_BATCH_DELAY_MS: z.coerce.number().default(200),
+  EMBEDDING_BATCH_SIZE: z.coerce.number().default(50),
+  EMBEDDING_BATCH_DELAY_MS: z.coerce.number().default(35000),
 
   R2_POLL_CRON: z.string().default('0 2 * * *'),
   COVER_FETCH_CRON: z.string().default('0 3 * * *'),

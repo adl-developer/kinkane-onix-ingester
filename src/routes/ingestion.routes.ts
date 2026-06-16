@@ -41,4 +41,11 @@ router.get('/jobs/:id', ingestionController.getJob);
  */
 router.get('/unprocessed', ingestionController.listUnprocessed);
 
+/**
+ * POST /ingestion/backfill-embeddings
+ * Generates and writes embeddings for all books where embedding IS NULL.
+ * Long-running — returns { processed, failed, total } when complete.
+ */
+router.post('/backfill-embeddings', ingestionController.backfillEmbeddings);
+
 export default router;
