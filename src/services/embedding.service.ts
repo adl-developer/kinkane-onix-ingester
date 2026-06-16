@@ -68,7 +68,7 @@ class EmbeddingService {
     return results;
   }
 
-  private async withRetry<T>(fn: () => Promise<T>, maxAttempts = 3): Promise<T> {
+  private async withRetry<T>(fn: () => Promise<T>, maxAttempts = 5): Promise<T> {
     let lastError: unknown;
     for (let attempt = 1; attempt <= maxAttempts; attempt++) {
       try {
@@ -76,7 +76,12 @@ class EmbeddingService {
       } catch (err) {
         lastError = err;
         if (attempt < maxAttempts) {
-          const delay = 1000 * 2 ** (attempt - 1); // 1s, 2s, 4s
+          // If Gemini returns a retry-after hint in the error message, honour it;
+          // otherwise fall back to exponential back-off (1s, 2s, 4s, 8s …).
+          const retryAfterMatch = String(err).match(/retryDelay["\s:]+(\d+)s/);
+          const delay = retryAfterMatch
+            ? (parseInt(retryAfterMatch[1], 10) + 2) * 1000
+            : 1000 * 2 ** (attempt - 1);
           await new Promise((res) => setTimeout(res, delay));
         }
       }
