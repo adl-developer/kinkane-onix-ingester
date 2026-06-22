@@ -56,6 +56,7 @@ class EmbeddingService {
         model.batchEmbedContents({
           requests: slice.map((text) => ({
             content: { parts: [{ text }], role: 'user' },
+            outputDimensionality: 768,
           })),
         }),
       );
