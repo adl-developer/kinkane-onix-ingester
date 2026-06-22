@@ -8,6 +8,7 @@ import { embeddingService } from '../services/embedding.service';
 import { db } from '../db';
 import { books, bookContributors } from '../db/schema';
 import { config } from '../config';
+import { logger } from '../lib/logger';
 
 const triggerSchema = z.object({
   fileKey: z.string().min(1),
@@ -25,6 +26,80 @@ const listQuerySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),
   offset: z.coerce.number().int().min(0).default(0),
 });
+
+async function runEmbeddingBackfill(): Promise<void> {
+  // Fetch all books without embeddings, with their primary authors
+  const nullBooks = await db
+    .select({
+      id: books.id,
+      title: books.title,
+      subtitle: books.subtitle,
+      shortDescription: books.shortDescription,
+      longDescription: books.longDescription,
+    })
+    .from(books)
+    .where(isNull(books.embedding));
+
+  if (nullBooks.length === 0) {
+    logger.info('Embedding backfill: no books need embeddings');
+    return;
+  }
+
+  // Fetch primary authors (role A01) for all affected books
+  const bookIds = nullBooks.map((b) => b.id);
+  const contributors = await db
+    .select({ bookId: bookContributors.bookId, personName: bookContributors.personName })
+    .from(bookContributors)
+    .where(eq(bookContributors.role, 'A01'));
+
+  const authorMap = new Map<number, string[]>();
+  for (const c of contributors) {
+    if (!bookIds.includes(c.bookId)) continue;
+    if (!authorMap.has(c.bookId)) authorMap.set(c.bookId, []);
+    if (c.personName) authorMap.get(c.bookId)!.push(c.personName);
+  }
+
+  // Build embedding texts from DB columns (same format as buildBookText)
+  const texts = nullBooks.map((b) => {
+    const authors = (authorMap.get(b.id) ?? []).join(', ');
+    const parts = [
+      b.title,
+      b.subtitle,
+      authors ? `By ${authors}` : null,
+      b.shortDescription ?? b.longDescription?.slice(0, 500),
+    ].filter(Boolean);
+    return parts.join('. ');
+  });
+
+  // generateBatch handles batching + rate limiting internally
+  const vectors = await embeddingService.generateBatch(texts);
+
+  // Write embeddings back, counting successes and failures
+  let processed = 0;
+  let failed = 0;
+  const now = new Date();
+
+  for (let i = 0; i < nullBooks.length; i++) {
+    const vector = vectors[i];
+    if (!vector || vector.length === 0) {
+      failed++;
+      continue;
+    }
+    try {
+      await db
+        .update(books)
+        .set({ embedding: vector, embeddedAt: now, updatedAt: now })
+        .where(eq(books.id, nullBooks[i].id));
+      processed++;
+    } catch (err: unknown) {
+      const e = err as Error;
+      logger.error('Embedding write failed', { bookId: nullBooks[i].id, error: e.message });
+      failed++;
+    }
+  }
+
+  logger.info('Embedding backfill complete', { processed, failed, total: nullBooks.length });
+}
 
 export const ingestionController = {
   async trigger(req: Request, res: Response): Promise<void> {
@@ -96,84 +171,16 @@ export const ingestionController = {
   /**
    * POST /ingestion/backfill-embeddings
    * Fetches all books with embedding IS NULL, generates embeddings in batches,
-   * and writes them back. Returns { processed, failed } when done.
-   * Long-running — may take several minutes for large catalogs.
+   * and writes them back. Responds immediately with 202; the work runs in the
+   * background and results are logged on completion.
    */
   async backfillEmbeddings(_req: Request, res: Response): Promise<void> {
-    try {
-      // Fetch all books without embeddings, with their primary authors
-      const nullBooks = await db
-        .select({
-          id: books.id,
-          title: books.title,
-          subtitle: books.subtitle,
-          shortDescription: books.shortDescription,
-          longDescription: books.longDescription,
-        })
-        .from(books)
-        .where(isNull(books.embedding));
+    res.status(202).json({ message: 'Embedding backfill started' });
 
-      if (nullBooks.length === 0) {
-        res.status(200).json({ processed: 0, failed: 0, message: 'No books need embeddings' });
-        return;
-      }
-
-      // Fetch primary authors (role A01) for all affected books
-      const bookIds = nullBooks.map((b) => b.id);
-      const contributors = await db
-        .select({ bookId: bookContributors.bookId, personName: bookContributors.personName })
-        .from(bookContributors)
-        .where(eq(bookContributors.role, 'A01'));
-
-      const authorMap = new Map<number, string[]>();
-      for (const c of contributors) {
-        if (!bookIds.includes(c.bookId)) continue;
-        if (!authorMap.has(c.bookId)) authorMap.set(c.bookId, []);
-        if (c.personName) authorMap.get(c.bookId)!.push(c.personName);
-      }
-
-      // Build embedding texts from DB columns (same format as buildBookText)
-      const texts = nullBooks.map((b) => {
-        const authors = (authorMap.get(b.id) ?? []).join(', ');
-        const parts = [
-          b.title,
-          b.subtitle,
-          authors ? `By ${authors}` : null,
-          b.shortDescription ?? b.longDescription?.slice(0, 500),
-        ].filter(Boolean);
-        return parts.join('. ');
-      });
-
-      // generateBatch handles batching + rate limiting internally
-      const vectors = await embeddingService.generateBatch(texts);
-
-      // Write embeddings back, counting successes and failures
-      let processed = 0;
-      let failed = 0;
-      const now = new Date();
-
-      for (let i = 0; i < nullBooks.length; i++) {
-        const vector = vectors[i];
-        if (!vector || vector.length === 0) {
-          failed++;
-          continue;
-        }
-        try {
-          await db
-            .update(books)
-            .set({ embedding: vector, embeddedAt: now, updatedAt: now })
-            .where(eq(books.id, nullBooks[i].id));
-          processed++;
-        } catch {
-          failed++;
-        }
-      }
-
-      res.status(200).json({ processed, failed, total: nullBooks.length });
-    } catch (err: unknown) {
+    runEmbeddingBackfill().catch((err: unknown) => {
       const e = err as Error;
-      res.status(500).json({ error: e.message });
-    }
+      logger.error('Embedding backfill failed', { error: e.message });
+    });
   },
 
   /**
