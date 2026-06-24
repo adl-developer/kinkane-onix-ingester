@@ -48,4 +48,11 @@ router.get('/unprocessed', ingestionController.listUnprocessed);
  */
 router.post('/backfill-embeddings', ingestionController.backfillEmbeddings);
 
+/**
+ * POST /ingestion/backfill-excerpts
+ * Forces a full Jellybooks catalogue resync. Responds 202 immediately; the
+ * sync runs in the background and results are logged on completion.
+ */
+router.post('/backfill-excerpts', ingestionController.backfillExcerpts);
+
 export default router;

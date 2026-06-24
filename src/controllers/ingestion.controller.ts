@@ -5,6 +5,7 @@ import { isNull, eq } from 'drizzle-orm';
 import { ingestionService } from '../services/ingestion.service';
 import { storageService } from '../services/storage.service';
 import { embeddingService } from '../services/embedding.service';
+import { excerptService } from '../services/excerpt.service';
 import { db } from '../db';
 import { books, bookContributors } from '../db/schema';
 import { config } from '../config';
@@ -180,6 +181,22 @@ export const ingestionController = {
     runEmbeddingBackfill().catch((err: unknown) => {
       const e = err as Error;
       logger.error('Embedding backfill failed', { error: e.message });
+    });
+  },
+
+  /**
+   * POST /ingestion/backfill-excerpts
+   * Forces a full Jellybooks catalogue resync, regardless of whether
+   * book_excerpts already has data. Useful for manually re-running the
+   * backfill after a partial failure — the scheduled cron only auto-runs
+   * the full backfill once, when the table is empty.
+   */
+  async backfillExcerpts(_req: Request, res: Response): Promise<void> {
+    res.status(202).json({ message: 'Excerpt backfill started' });
+
+    excerptService.backfillExcerpts().catch((err: unknown) => {
+      const e = err as Error;
+      logger.error('Excerpt backfill failed', { error: e.message });
     });
   },
 
