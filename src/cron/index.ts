@@ -2,6 +2,7 @@ import cron from 'node-cron';
 import { config } from '../config';
 import { ingestionService } from '../services/ingestion.service';
 import { coverService } from '../services/cover.service';
+import { excerptService } from '../services/excerpt.service';
 import { runFailedChunkCleanup } from './chunk-cleanup.cron';
 import { logger } from '../lib/logger';
 
@@ -54,6 +55,25 @@ export function startCron(): void {
   });
 
   logger.info('Cover fetch scheduled', { schedule: coverSchedule });
+
+  // ── Excerpt sync ─────────────────────────────────────────────────────────
+  const excerptSchedule = config.cron.excerptSyncSchedule;
+  if (!cron.validate(excerptSchedule)) {
+    throw new Error(`Invalid excerpt sync cron schedule: ${excerptSchedule}`);
+  }
+
+  cron.schedule(excerptSchedule, async () => {
+    logger.info('Starting excerpt sync cron');
+    try {
+      await excerptService.syncExcerpts();
+    } catch (err) {
+      logger.error('Excerpt sync cron failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  logger.info('Excerpt sync scheduled', { schedule: excerptSchedule });
 
   // ── Failed chunk R2 cleanup ───────────────────────────────────────────────
   // Runs daily at 04:00 — deletes R2 payload files for failed chunks older

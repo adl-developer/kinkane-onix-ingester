@@ -32,11 +32,16 @@ const envSchema = z.object({
 
   R2_POLL_CRON: z.string().default('0 2 * * *'),
   COVER_FETCH_CRON: z.string().default('0 3 * * *'),
+  EXCERPT_SYNC_CRON: z.string().default('0 5 * * *'),
 
   // Optional — cover fetching is skipped if not set
   GOOGLE_BOOKS_API_KEY: z.string().optional(),
   COVER_FETCH_BATCH_SIZE: z.coerce.number().default(50),
   COVER_FETCH_DELAY_MS: z.coerce.number().default(200),
+
+  // Optional — excerpt sync is skipped if not set
+  JELLYBOOKS_API_KEY: z.string().optional(),
+  JELLYBOOKS_BASE_URL: z.string().url().default('https://www.jellybooks.com'),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -88,6 +93,11 @@ export const config = {
     coverFetchSchedule: env.COVER_FETCH_CRON,
     coverFetchBatchSize: env.COVER_FETCH_BATCH_SIZE,
     coverFetchDelayMs: env.COVER_FETCH_DELAY_MS,
+    excerptSyncSchedule: env.EXCERPT_SYNC_CRON,
+  },
+  jellybooks: {
+    apiKey: env.JELLYBOOKS_API_KEY,
+    baseUrl: env.JELLYBOOKS_BASE_URL,
   },
 } as const;
 
