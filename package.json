@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "ONIX feed ingestion pipeline service",
   "scripts": {
+    "prepare": "git config core.hooksPath .githooks",
     "dev": "tsx watch src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
@@ -35,6 +36,7 @@
     "@types/node": "^22.10.0",
     "@types/node-cron": "^3.0.11",
     "@types/sax": "^1.2.7",
+    "conventional-changelog-cli": "^5.0.0",
     "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }
