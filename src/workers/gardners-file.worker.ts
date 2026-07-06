@@ -1,3 +1,7 @@
+import { createReadStream } from 'fs';
+import { unlink } from 'fs/promises';
+import { tmpdir } from 'os';
+import { join } from 'path';
 import { Worker, Job } from 'bullmq';
 import { redis, gardnersChunkQueue } from '../queue';
 import { gardnersFetcher } from '../services/gardners/fetcher.service';
@@ -36,11 +40,17 @@ async function processGardnersFileJob(
   job: Job<GardnersFileJobData>,
 ): Promise<GardnersFileJobResult> {
   const { feed, connection, file, logId } = job.data;
+  const localPath = join(tmpdir(), `gardners-${feed}-${logId}.txt`);
 
   let chunkIndex = 0;
 
   try {
-    const stream = await gardnersFetcher.openStreamForFile(connection, file);
+    // fastGet (concurrent requests) rather than a plain stream — see
+    // downloadToLocalFile's doc comment. A single-request-at-a-time stream
+    // read of this file took ~19 minutes in testing; fastGet-based transfer
+    // is bandwidth- rather than latency-bound.
+    await gardnersFetcher.downloadToLocalFile(connection, file, localPath);
+    const stream = createReadStream(localPath);
     const csvOptions = buildCsvOptions(job);
     const generator = parseGardnersCsv(stream, csvOptions, 1000);
 
@@ -90,6 +100,8 @@ async function processGardnersFileJob(
     const error = err instanceof Error ? err : new Error(String(err));
     await gardnersFetcher.markFetchFailed(logId, error);
     throw error;
+  } finally {
+    await unlink(localPath).catch(() => undefined);
   }
 }
 

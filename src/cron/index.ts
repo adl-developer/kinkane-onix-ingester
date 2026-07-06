@@ -4,6 +4,7 @@ import { ingestionService } from '../services/ingestion.service';
 import { coverService } from '../services/cover.service';
 import { excerptService } from '../services/excerpt.service';
 import { gardnersInventoryService } from '../services/gardners/gardners-inventory.service';
+import { gardnersBiblioService } from '../services/gardners/biblio.service';
 import { runFailedChunkCleanup } from './chunk-cleanup.cron';
 import { logger } from '../lib/logger';
 
@@ -113,4 +114,26 @@ export function startCron(): void {
   });
 
   logger.info('Gardners Inventory poll scheduled', { schedule: gardnersInventorySchedule });
+
+  // ── Gardners Biblio ONIX delta poll ──────────────────────────────────────
+  // The full catalogue reload (gardnersBiblioService.syncFull) is NOT wired
+  // to a cron — it's a rare, expensive (~1.7GB) operation triggered
+  // manually via the admin API when an initial/re-sync load is needed.
+  const gardnersBiblioSchedule = config.gardners.cron.biblioDeltaSchedule;
+  if (!cron.validate(gardnersBiblioSchedule)) {
+    throw new Error(`Invalid Gardners Biblio delta cron schedule: ${gardnersBiblioSchedule}`);
+  }
+
+  cron.schedule(gardnersBiblioSchedule, async () => {
+    logger.info('Polling Gardners Biblio ONIX delta feed');
+    try {
+      await gardnersBiblioService.syncDelta();
+    } catch (err) {
+      logger.error('Gardners Biblio delta poll failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  logger.info('Gardners Biblio delta poll scheduled', { schedule: gardnersBiblioSchedule });
 }

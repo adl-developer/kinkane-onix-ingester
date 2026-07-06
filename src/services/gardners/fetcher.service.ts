@@ -1,5 +1,5 @@
 import { Readable } from 'stream';
-import { and, eq, inArray, ne, sql } from 'drizzle-orm';
+import { and, eq, gt, inArray, ne, or, sql } from 'drizzle-orm';
 import { db } from '../../db';
 import { gardnersFetchLog, gardnersFeedEnum } from '../../db/schema';
 import { storageService } from '../storage.service';
@@ -50,17 +50,25 @@ function openConnection(name: GardnersConnectionName) {
   }
 }
 
+// A claim stuck in 'downloading'/'processing' for longer than this is
+// treated as dead — a crashed process, a killed job, or a stream that
+// silently hung without ever resolving to completed/failed (observed live:
+// an SFTP connection drop mid-transfer that ssh2-sftp-client only logged by
+// default, never rejecting the promise governing the claim) — and becomes
+// eligible for retry. Comfortably longer than the largest file (~1.7GB
+// Biblio Full) should ever take even on a slow connection.
+const STALE_CLAIM_HOURS = 3;
+
 /**
  * Lists candidate files for a feed and filters out ones already claimed.
  * `(feed, remotePath)` in gardners_fetch_log is the idempotency key —
  * Gardners filenames are date/week-stamped, so the remote path itself is a
  * stable "have I already claimed this exact file" identifier; no separate
- * cursor/watermark is needed. Only 'failed' rows are excluded from the block
- * list (matching ingestion.service.ts's listUnprocessedR2Files precedent) —
- * a file that's downloading/processing/completed must NOT be re-listed, or
- * a second cron tick firing before a slow job finishes would enqueue a
- * duplicate. Results are sorted by filename ascending, which matters for
- * sequence-ordered feeds like Avail13.
+ * cursor/watermark is needed. 'failed' rows are always retryable; a
+ * 'downloading'/'processing' row blocks re-listing only while it's recent —
+ * past STALE_CLAIM_HOURS it's assumed dead and becomes retryable too, or a
+ * single crashed run would block that file forever. Results are sorted by
+ * filename ascending, which matters for sequence-ordered feeds like Avail13.
  */
 async function listUnprocessedFiles(cfg: FetchFeedConfig): Promise<RemoteFileDescriptor[]> {
   const candidates = await withConnection(cfg.connection, async (client) => {
@@ -79,6 +87,7 @@ async function listUnprocessedFiles(cfg: FetchFeedConfig): Promise<RemoteFileDes
   if (candidates.length === 0) return [];
 
   const paths = candidates.map((f) => f.path);
+  const staleThreshold = new Date(Date.now() - STALE_CLAIM_HOURS * 60 * 60 * 1000);
   const claimed = await db
     .select({ remotePath: gardnersFetchLog.remotePath })
     .from(gardnersFetchLog)
@@ -86,7 +95,10 @@ async function listUnprocessedFiles(cfg: FetchFeedConfig): Promise<RemoteFileDes
       and(
         eq(gardnersFetchLog.feed, cfg.feed),
         inArray(gardnersFetchLog.remotePath, paths),
-        ne(gardnersFetchLog.status, 'failed'),
+        or(
+          eq(gardnersFetchLog.status, 'completed'),
+          and(ne(gardnersFetchLog.status, 'failed'), gt(gardnersFetchLog.startedAt, staleThreshold)),
+        ),
       ),
     );
 
@@ -97,23 +109,43 @@ async function listUnprocessedFiles(cfg: FetchFeedConfig): Promise<RemoteFileDes
 }
 
 /**
- * Creates the gardners_fetch_log row for a file before any BullMQ job is
- * enqueued — this is what makes the file "claimed" so listUnprocessedFiles
- * won't re-offer it on the next cron tick, even though the actual download
- * happens later inside a queued worker job (a live stream can't be
- * serialized into job data, so the claim and the stream open are separate
- * steps).
+ * Creates (or resets, on retry) the gardners_fetch_log row for a file before
+ * any BullMQ job is enqueued — this is what makes the file "claimed" so
+ * listUnprocessedFiles won't re-offer it on the next cron tick, even though
+ * the actual download happens later inside a queued worker job (a live
+ * stream can't be serialized into job data, so the claim and the stream
+ * open are separate steps).
+ *
+ * A previously-failed file retains its (feed, remotePath) row rather than
+ * getting a fresh one — the unique index on that pair means a second plain
+ * INSERT would violate the constraint, so this upserts, resetting the
+ * existing row back to a clean 'downloading' state for the retry.
  */
 async function claimFile(feed: GardnersFeed, file: RemoteFileDescriptor): Promise<number> {
+  const values = {
+    feed,
+    remotePath: file.path,
+    remoteFilename: file.filename,
+    remoteModifiedAt: file.modifiedAt ?? undefined,
+    remoteSize: file.size,
+    status: 'downloading' as const,
+  };
+
   const [row] = await db
     .insert(gardnersFetchLog)
-    .values({
-      feed,
-      remotePath: file.path,
-      remoteFilename: file.filename,
-      remoteModifiedAt: file.modifiedAt ?? undefined,
-      remoteSize: file.size,
-      status: 'downloading',
+    .values(values)
+    .onConflictDoUpdate({
+      target: [gardnersFetchLog.feed, gardnersFetchLog.remotePath],
+      set: {
+        ...values,
+        r2Key: null,
+        totalChunks: null,
+        processedChunks: 0,
+        rowCount: null,
+        errorMessage: null,
+        startedAt: new Date(),
+        completedAt: null,
+      },
     })
     .returning({ id: gardnersFetchLog.id });
   return row.id;
@@ -136,6 +168,27 @@ async function openStreamForFile(
   stream.once('close', close);
   stream.once('error', close);
   return stream;
+}
+
+/**
+ * Downloads a remote file to a local path using the protocol's
+ * concurrent/optimized transfer method (SFTP's fastGet, 64 requests in
+ * flight) rather than a plain single-request-at-a-time stream. Observed
+ * live: plain streaming reads from Gardners' UK-hosted SFTP servers run at
+ * ~160KB/s (latency-bound — each read waits for the previous one's
+ * response), while fastGet and the `sftp` CLI both achieve ~9.7MB/s
+ * (bandwidth-bound, many requests in flight at once). For anything beyond a
+ * few MB this difference is the gap between minutes and hours. Callers
+ * should read the resulting local file (e.g. via fs.createReadStream) for
+ * any further streaming (unzip, CSV parsing, upload) rather than reverting
+ * to openStreamForFile/readStream for large feeds.
+ */
+async function downloadToLocalFile(
+  connection: GardnersConnectionName,
+  file: RemoteFileDescriptor,
+  localPath: string,
+): Promise<void> {
+  await withConnection(connection, (client) => client.downloadToFile(file.path, localPath));
 }
 
 /**
@@ -250,6 +303,7 @@ export const gardnersFetcher = {
   openStreamForFile,
   downloadToStream,
   downloadToR2,
+  downloadToLocalFile,
   setChunkingComplete,
   incrementProcessedChunks,
   markFetchCompleted,

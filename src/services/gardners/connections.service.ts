@@ -23,12 +23,29 @@ export interface GardnersRemoteClient {
   exists(path: string): Promise<boolean>;
   readStream(path: string): Promise<Readable>;
   size(path: string): Promise<number>;
+  // Downloads to a local path using the protocol's concurrent/optimized
+  // transfer method rather than a plain stream — see the note above
+  // downloadToLocalFile in fetcher.service.ts for why this exists.
+  downloadToFile(path: string, localPath: string): Promise<void>;
 }
 
 interface OpenConnection {
   client: GardnersRemoteClient;
   close(): Promise<void>;
 }
+
+// The Biblio ONIX zips (up to ~1.7GB uncompressed) take long enough to
+// stream that an idle SSH connection can otherwise be silently dropped
+// mid-transfer (observed live: a `read ETIMEDOUT` mid-download that
+// ssh2-sftp-client only logs by default, without rejecting anything —
+// see biblio.service.ts's use of stream.pipeline for the other half of
+// this fix). Keepalive packets prevent the connection from going idle
+// enough to trigger that in the first place.
+const SFTP_KEEPALIVE_OPTIONS = {
+  keepaliveInterval: 10_000,
+  keepaliveCountMax: 5,
+  readyTimeout: 20_000,
+};
 
 function sftpClientAdapter(client: SftpClient): GardnersRemoteClient {
   return {
@@ -53,6 +70,15 @@ function sftpClientAdapter(client: SftpClient): GardnersRemoteClient {
     async size(path) {
       const stat = await client.stat(path);
       return stat.size;
+    },
+    async downloadToFile(path, localPath) {
+      // fastGet issues many concurrent SFTP READ requests (64 by default)
+      // instead of one at a time — createReadStream's plain streaming read
+      // is latency-bound (~160KB/s observed live against Gardners' UK
+      // servers) since each read waits for the previous one's response;
+      // fastGet is bandwidth-bound (~9.7MB/s observed), matching what a
+      // plain `sftp get` CLI command achieves.
+      await client.fastGet(path, localPath);
     },
   };
 }
@@ -89,6 +115,9 @@ function ftpClientAdapter(client: FtpClient): GardnersRemoteClient {
     async size(path) {
       return client.size(path);
     },
+    async downloadToFile(path, localPath) {
+      await client.downloadTo(localPath, path);
+    },
   };
 }
 
@@ -99,6 +128,7 @@ async function openBespokeSftp(): Promise<OpenConnection> {
     port: config.gardners.bespokeSftp.port,
     username: config.gardners.bespokeSftp.username,
     password: config.gardners.bespokeSftp.password,
+    ...SFTP_KEEPALIVE_OPTIONS,
   });
   return { client: sftpClientAdapter(client), close: () => client.end().then(() => undefined) };
 }
@@ -110,6 +140,7 @@ async function openGenericSftp(): Promise<OpenConnection> {
     port: config.gardners.genericSftp.port,
     username: config.gardners.genericSftp.username,
     password: config.gardners.genericSftp.password,
+    ...SFTP_KEEPALIVE_OPTIONS,
   });
   return { client: sftpClientAdapter(client), close: () => client.end().then(() => undefined) };
 }
