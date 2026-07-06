@@ -44,6 +44,44 @@ async function upsertStockRows(
   }
 }
 
+/**
+ * Links gardners_stock rows to `books` by isbn13, scoped to just the ISBNs
+ * from the batch that was just upserted — not a periodic full-table scan,
+ * which would get more expensive every day as both tables grow into the
+ * millions of rows. Only touches rows where book_id is still NULL, so
+ * already-linked rows aren't rewritten on every sync.
+ *
+ * This is scoped-by-design, not perfect: an ISBN whose `books` row only
+ * appears after this ISBN's last Inventory sync stays unlinked until that
+ * ISBN is next touched by a future Inventory/Avail13 run. Acceptable
+ * trade-off per the plan — a full-table catch-up would be periodically
+ * expensive at scale for a gap that mostly closes itself day to day.
+ */
+async function backfillStockBookIds(isbns: string[]): Promise<void> {
+  if (isbns.length === 0) return;
+
+  try {
+    const isbnArray = sql.join(
+      isbns.map((isbn) => sql`${isbn}`),
+      sql`, `,
+    );
+    await db.execute(sql`
+      UPDATE gardners_stock
+      SET book_id = books.id
+      FROM books
+      WHERE gardners_stock.isbn13 = books.isbn13
+        AND gardners_stock.book_id IS NULL
+        AND gardners_stock.isbn13 = ANY(ARRAY[${isbnArray}]::text[])
+    `);
+  } catch (err) {
+    logger.error('Failed to backfill gardners_stock.book_id', {
+      isbnCount: isbns.length,
+      error: err instanceof Error ? err.message : String(err),
+    });
+  }
+}
+
 export const gardnersUpserts = {
   upsertStockRows,
+  backfillStockBookIds,
 };

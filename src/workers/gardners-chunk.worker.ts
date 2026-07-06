@@ -19,7 +19,11 @@ async function upsertChunk(
       // revive them before handing off to Drizzle, whose timestamp column
       // binding expects an actual Date instance.
       const revived = rows.map((r) => ({ ...r, stockUpdatedAt: new Date(r.stockUpdatedAt) }));
-      return gardnersUpserts.upsertStockRows(revived);
+      const result = await gardnersUpserts.upsertStockRows(revived);
+      // Scoped to this batch's ISBNs only — see backfillStockBookIds's doc
+      // comment for why this isn't a full-table catch-up.
+      await gardnersUpserts.backfillStockBookIds(revived.map((r) => r.isbn13));
+      return result;
     }
     default:
       throw new Error(`Unsupported Gardners feed for chunk worker: ${feed}`);
