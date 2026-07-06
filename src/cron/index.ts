@@ -3,6 +3,7 @@ import { config } from '../config';
 import { ingestionService } from '../services/ingestion.service';
 import { coverService } from '../services/cover.service';
 import { excerptService } from '../services/excerpt.service';
+import { gardnersInventoryService } from '../services/gardners/gardners-inventory.service';
 import { runFailedChunkCleanup } from './chunk-cleanup.cron';
 import { logger } from '../lib/logger';
 
@@ -90,4 +91,26 @@ export function startCron(): void {
   });
 
   logger.info('Failed chunk R2 cleanup scheduled (daily at 04:00)');
+
+  // ── Gardners Bespoke Inventory poll ──────────────────────────────────────
+  // Highest-priority Gardners feed — daily price/stock snapshot from the
+  // dedicated edi.gardners.com account. See project memory / plan for the
+  // full Gardners feed rollout; this is the first of 8 feeds being wired up.
+  const gardnersInventorySchedule = config.gardners.cron.inventorySchedule;
+  if (!cron.validate(gardnersInventorySchedule)) {
+    throw new Error(`Invalid Gardners Inventory cron schedule: ${gardnersInventorySchedule}`);
+  }
+
+  cron.schedule(gardnersInventorySchedule, async () => {
+    logger.info('Polling Gardners Bespoke Inventory feed');
+    try {
+      await gardnersInventoryService.sync();
+    } catch (err) {
+      logger.error('Gardners Inventory poll failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  logger.info('Gardners Inventory poll scheduled', { schedule: gardnersInventorySchedule });
 }

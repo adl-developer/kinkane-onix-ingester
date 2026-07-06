@@ -2,6 +2,8 @@ import app from './app';
 import { config } from './config';
 import { startFileWorker } from './workers/file.worker';
 import { startChunkWorker } from './workers/chunk.worker';
+import { startGardnersFileWorker } from './workers/gardners-file.worker';
+import { startGardnersChunkWorker } from './workers/gardners-chunk.worker';
 import { startCron } from './cron';
 import { logger } from './lib/logger';
 
@@ -9,6 +11,8 @@ async function main(): Promise<void> {
   // Start BullMQ workers
   const fileWorker = startFileWorker();
   const chunkWorker = startChunkWorker(5);
+  const gardnersFileWorker = startGardnersFileWorker();
+  const gardnersChunkWorker = startGardnersChunkWorker(5);
 
   // Start cron poller
   startCron();
@@ -29,7 +33,12 @@ async function main(): Promise<void> {
   const shutdown = async (signal: string) => {
     logger.info('Shutting down gracefully', { signal });
     server.close(() => logger.info('HTTP server closed'));
-    await Promise.all([fileWorker.close(), chunkWorker.close()]);
+    await Promise.all([
+      fileWorker.close(),
+      chunkWorker.close(),
+      gardnersFileWorker.close(),
+      gardnersChunkWorker.close(),
+    ]);
     logger.info('Workers closed');
     process.exit(0);
   };

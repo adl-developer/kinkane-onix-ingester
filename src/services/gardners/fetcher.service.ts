@@ -1,5 +1,5 @@
 import { Readable } from 'stream';
-import { and, eq, inArray } from 'drizzle-orm';
+import { and, eq, inArray, ne, sql } from 'drizzle-orm';
 import { db } from '../../db';
 import { gardnersFetchLog, gardnersFeedEnum } from '../../db/schema';
 import { storageService } from '../storage.service';
@@ -51,12 +51,16 @@ function openConnection(name: GardnersConnectionName) {
 }
 
 /**
- * Lists candidate files for a feed and filters out ones already fully
- * processed. `(feed, remotePath)` in gardners_fetch_log is the idempotency
- * key — Gardners filenames are date/week-stamped, so the remote path itself
- * is a stable "have I processed this exact file" identifier; no separate
- * cursor/watermark is needed. Results are sorted by filename ascending,
- * which matters for sequence-ordered feeds like Avail13.
+ * Lists candidate files for a feed and filters out ones already claimed.
+ * `(feed, remotePath)` in gardners_fetch_log is the idempotency key —
+ * Gardners filenames are date/week-stamped, so the remote path itself is a
+ * stable "have I already claimed this exact file" identifier; no separate
+ * cursor/watermark is needed. Only 'failed' rows are excluded from the block
+ * list (matching ingestion.service.ts's listUnprocessedR2Files precedent) —
+ * a file that's downloading/processing/completed must NOT be re-listed, or
+ * a second cron tick firing before a slow job finishes would enqueue a
+ * duplicate. Results are sorted by filename ascending, which matters for
+ * sequence-ordered feeds like Avail13.
  */
 async function listUnprocessedFiles(cfg: FetchFeedConfig): Promise<RemoteFileDescriptor[]> {
   const candidates = await withConnection(cfg.connection, async (client) => {
@@ -75,24 +79,32 @@ async function listUnprocessedFiles(cfg: FetchFeedConfig): Promise<RemoteFileDes
   if (candidates.length === 0) return [];
 
   const paths = candidates.map((f) => f.path);
-  const completed = await db
+  const claimed = await db
     .select({ remotePath: gardnersFetchLog.remotePath })
     .from(gardnersFetchLog)
     .where(
       and(
         eq(gardnersFetchLog.feed, cfg.feed),
         inArray(gardnersFetchLog.remotePath, paths),
-        eq(gardnersFetchLog.status, 'completed'),
+        ne(gardnersFetchLog.status, 'failed'),
       ),
     );
 
-  const done = new Set(completed.map((r) => r.remotePath));
+  const blocked = new Set(claimed.map((r) => r.remotePath));
   return candidates
-    .filter((f) => !done.has(f.path))
+    .filter((f) => !blocked.has(f.path))
     .sort((a, b) => a.filename.localeCompare(b.filename));
 }
 
-async function startFetchLog(feed: GardnersFeed, file: RemoteFileDescriptor): Promise<number> {
+/**
+ * Creates the gardners_fetch_log row for a file before any BullMQ job is
+ * enqueued — this is what makes the file "claimed" so listUnprocessedFiles
+ * won't re-offer it on the next cron tick, even though the actual download
+ * happens later inside a queued worker job (a live stream can't be
+ * serialized into job data, so the claim and the stream open are separate
+ * steps).
+ */
+async function claimFile(feed: GardnersFeed, file: RemoteFileDescriptor): Promise<number> {
   const [row] = await db
     .insert(gardnersFetchLog)
     .values({
@@ -105,6 +117,108 @@ async function startFetchLog(feed: GardnersFeed, file: RemoteFileDescriptor): Pr
     })
     .returning({ id: gardnersFetchLog.id });
   return row.id;
+}
+
+/**
+ * Opens a connection and returns a live stream for the caller to consume.
+ * The connection is intentionally NOT closed when this function returns —
+ * it closes automatically once the stream ends or errors. Does not touch
+ * gardners_fetch_log; call claimFile first to get a logId.
+ */
+async function openStreamForFile(
+  connection: GardnersConnectionName,
+  file: RemoteFileDescriptor,
+): Promise<Readable> {
+  const conn = await openConnection(connection);
+  const stream = await conn.client.readStream(file.path);
+  const close = () => conn.close().catch(() => undefined);
+  stream.once('end', close);
+  stream.once('close', close);
+  stream.once('error', close);
+  return stream;
+}
+
+/**
+ * Convenience combining claimFile + openStreamForFile for feeds that fetch
+ * and process a stream in one place without going through the chunk queue.
+ */
+async function downloadToStream(
+  cfg: Pick<FetchFeedConfig, 'feed' | 'connection'>,
+  file: RemoteFileDescriptor,
+): Promise<{ logId: number; stream: Readable }> {
+  const logId = await claimFile(cfg.feed, file);
+  try {
+    const stream = await openStreamForFile(cfg.connection, file);
+    return { logId, stream };
+  } catch (err) {
+    await markFetchFailed(logId, err instanceof Error ? err : new Error(String(err)));
+    throw err;
+  }
+}
+
+/**
+ * Streams a remote file straight into R2 under `r2Key`. Used only for feeds
+ * that plug into a downstream R2-based pipeline (the ONIX Biblio zip, and
+ * cover images) — everything else streams straight into CSV parsing without
+ * an R2 hop (see downloadToStream).
+ */
+async function downloadToR2(
+  cfg: Pick<FetchFeedConfig, 'feed' | 'connection'>,
+  file: RemoteFileDescriptor,
+  r2Key: string,
+  contentType = 'application/octet-stream',
+): Promise<{ logId: number; r2Key: string }> {
+  const logId = await claimFile(cfg.feed, file);
+  try {
+    await withConnection(cfg.connection, async (client) => {
+      const stream = await client.readStream(file.path);
+      await storageService.uploadStream(r2Key, stream, contentType, file.size);
+    });
+    return { logId, r2Key };
+  } catch (err) {
+    await markFetchFailed(logId, err instanceof Error ? err : new Error(String(err)));
+    throw err;
+  }
+}
+
+/**
+ * Marks the file-worker phase done: the file has been fully streamed and
+ * split into `totalChunks` chunk jobs. Status moves to 'processing' — the
+ * chunk workers drive it to 'completed' via incrementProcessedChunks once
+ * every chunk finishes. If a file produces zero chunks (e.g. an empty
+ * file), call markFetchCompleted directly instead — there's nothing for a
+ * chunk worker to complete.
+ */
+async function setChunkingComplete(
+  logId: number,
+  info: { totalChunks: number; rowCount: number },
+): Promise<void> {
+  await db
+    .update(gardnersFetchLog)
+    .set({ status: 'processing', totalChunks: info.totalChunks, rowCount: info.rowCount })
+    .where(eq(gardnersFetchLog.id, logId));
+}
+
+/**
+ * Called by the chunk worker after each chunk finishes. Resolves the fetch
+ * log to 'completed' once every chunk has been accounted for — mirrors the
+ * ingestion_jobs/ingestion_chunks SQL CASE pattern in chunk.worker.ts.
+ */
+async function incrementProcessedChunks(logId: number): Promise<void> {
+  await db.execute(sql`
+    UPDATE gardners_fetch_log
+    SET
+      processed_chunks = processed_chunks + 1,
+      status = CASE
+        WHEN processed_chunks + 1 = total_chunks THEN 'completed'
+        ELSE status
+      END,
+      completed_at = CASE
+        WHEN processed_chunks + 1 = total_chunks THEN NOW()
+        ELSE completed_at
+      END
+    WHERE id = ${logId}
+  `);
 }
 
 async function markFetchCompleted(
@@ -130,63 +244,14 @@ async function markFetchFailed(logId: number, err: Error): Promise<void> {
     .where(eq(gardnersFetchLog.id, logId));
 }
 
-/**
- * Streams a remote file straight into R2 under `r2Key`. Used only for feeds
- * that plug into a downstream R2-based pipeline (the ONIX Biblio zip, and
- * cover images) — everything else streams straight into CSV parsing without
- * an R2 hop (see downloadToStream).
- */
-async function downloadToR2(
-  cfg: FetchFeedConfig,
-  file: RemoteFileDescriptor,
-  r2Key: string,
-  contentType = 'application/octet-stream',
-): Promise<{ logId: number; r2Key: string }> {
-  const logId = await startFetchLog(cfg.feed, file);
-  try {
-    await withConnection(cfg.connection, async (client) => {
-      const stream = await client.readStream(file.path);
-      await storageService.uploadStream(r2Key, stream, contentType, file.size);
-    });
-    return { logId, r2Key };
-  } catch (err) {
-    await markFetchFailed(logId, err instanceof Error ? err : new Error(String(err)));
-    throw err;
-  }
-}
-
-/**
- * Opens a connection and returns a live stream for the caller to consume —
- * the connection is intentionally NOT closed when this function returns
- * (unlike downloadToR2/listUnprocessedFiles, which use the auto-closing
- * withConnection wrapper), since the stream must stay readable afterwards.
- * The connection closes automatically once the stream ends or errors.
- * Caller must call markFetchCompleted/markFetchFailed on the returned logId
- * once done processing.
- */
-async function downloadToStream(
-  cfg: FetchFeedConfig,
-  file: RemoteFileDescriptor,
-): Promise<{ logId: number; stream: Readable }> {
-  const logId = await startFetchLog(cfg.feed, file);
-  try {
-    const conn = await openConnection(cfg.connection);
-    const stream = await conn.client.readStream(file.path);
-    const close = () => conn.close().catch(() => undefined);
-    stream.once('end', close);
-    stream.once('close', close);
-    stream.once('error', close);
-    return { logId, stream };
-  } catch (err) {
-    await markFetchFailed(logId, err instanceof Error ? err : new Error(String(err)));
-    throw err;
-  }
-}
-
 export const gardnersFetcher = {
   listUnprocessedFiles,
-  downloadToR2,
+  claimFile,
+  openStreamForFile,
   downloadToStream,
+  downloadToR2,
+  setChunkingComplete,
+  incrementProcessedChunks,
   markFetchCompleted,
   markFetchFailed,
 };
