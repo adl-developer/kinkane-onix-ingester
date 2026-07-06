@@ -92,6 +92,30 @@ class StorageService {
   }
 
   /**
+   * Streams a Readable directly into R2 without buffering it fully in memory.
+   * Used for large files fetched from Gardners SFTP/FTP (e.g. the ONIX Biblio
+   * zip entry). `PutObjectCommand` requires a known Content-Length when the
+   * SDK can't determine one from the stream itself — pass `contentLength`
+   * (from an SFTP `stat()`/FTP `size()` call) for large/unknown-length
+   * streams; without it, R2 may reject or buffer the upload internally.
+   */
+  async uploadStream(
+    key: string,
+    stream: Readable,
+    contentType: string,
+    contentLength?: number,
+  ): Promise<void> {
+    const command = new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      Body: stream,
+      ContentType: contentType,
+      ContentLength: contentLength,
+    });
+    await this.s3.send(command);
+  }
+
+  /**
    * Uploads a raw buffer to R2 and returns the R2 key.
    * Use this for cover images fetched from external sources.
    */

@@ -42,6 +42,40 @@ const envSchema = z.object({
   // Optional — excerpt sync is skipped if not set
   JELLYBOOKS_API_KEY: z.string().optional(),
   JELLYBOOKS_BASE_URL: z.string().url().default('https://www.jellybooks.com'),
+
+  // Gardners Books — Bespoke Inventory SFTP (edi.gardners.com)
+  GARDNERS_BESPOKE_SFTP_HOST: z.string().min(1),
+  GARDNERS_BESPOKE_SFTP_PORT: z.coerce.number().default(22),
+  GARDNERS_BESPOKE_SFTP_USERNAME: z.string().min(1),
+  GARDNERS_BESPOKE_SFTP_PASSWORD: z.string().min(1),
+
+  // Gardners Books — Generic Data SFTP (data.gardners.com)
+  GARDNERS_GENERIC_SFTP_HOST: z.string().min(1),
+  GARDNERS_GENERIC_SFTP_PORT: z.coerce.number().default(22),
+  GARDNERS_GENERIC_SFTP_USERNAME: z.string().min(1),
+  GARDNERS_GENERIC_SFTP_PASSWORD: z.string().min(1),
+
+  // Gardners Books — Cover images FTP (covers.gardners.com, plain FTP)
+  GARDNERS_COVERS_FTP_HOST: z.string().min(1),
+  GARDNERS_COVERS_FTP_PORT: z.coerce.number().default(21),
+  GARDNERS_COVERS_FTP_USERNAME: z.string().min(1),
+  GARDNERS_COVERS_FTP_PASSWORD: z.string().min(1),
+
+  // Gardners feed cron schedules (UTC). Gardners' own drop times are quoted
+  // in GMT — schedules below build in a buffer to absorb BST offset and
+  // publish-time jitter. Firm sale / isbn slips / market restrictions times
+  // are best-guess placeholders pending a week or two of observed file mtimes.
+  GARDNERS_INVENTORY_CRON: z.string().default('0 13 * * *'),
+  GARDNERS_BIBLIO_DELTA_CRON: z.string().default('0 6 * * 1'),
+  GARDNERS_AVAIL13_CRON: z.string().default('15 * * * *'),
+  GARDNERS_PROMOTIONS_CRON: z.string().default('0 14 * * *'),
+  GARDNERS_FIRM_SALE_CRON: z.string().default('0 7 * * 2'),
+  GARDNERS_ISBN_SLIPS_CRON: z.string().default('30 7 * * 2'),
+  GARDNERS_MARKET_RESTRICTIONS_CRON: z.string().default('0 8 * * *'),
+  GARDNERS_COVERS_UPDATE_CRON: z.string().default('0 9 * * 1'),
+
+  GARDNERS_COVER_SYNC_BATCH_SIZE: z.coerce.number().default(200),
+  GARDNERS_COVER_SYNC_DELAY_MS: z.coerce.number().default(100),
 });
 
 const parsed = envSchema.safeParse(process.env);
@@ -98,6 +132,40 @@ export const config = {
   jellybooks: {
     apiKey: env.JELLYBOOKS_API_KEY,
     baseUrl: env.JELLYBOOKS_BASE_URL,
+  },
+  gardners: {
+    bespokeSftp: {
+      host: env.GARDNERS_BESPOKE_SFTP_HOST,
+      port: env.GARDNERS_BESPOKE_SFTP_PORT,
+      username: env.GARDNERS_BESPOKE_SFTP_USERNAME,
+      password: env.GARDNERS_BESPOKE_SFTP_PASSWORD,
+    },
+    genericSftp: {
+      host: env.GARDNERS_GENERIC_SFTP_HOST,
+      port: env.GARDNERS_GENERIC_SFTP_PORT,
+      username: env.GARDNERS_GENERIC_SFTP_USERNAME,
+      password: env.GARDNERS_GENERIC_SFTP_PASSWORD,
+    },
+    coversFtp: {
+      host: env.GARDNERS_COVERS_FTP_HOST,
+      port: env.GARDNERS_COVERS_FTP_PORT,
+      username: env.GARDNERS_COVERS_FTP_USERNAME,
+      password: env.GARDNERS_COVERS_FTP_PASSWORD,
+    },
+    cron: {
+      inventorySchedule: env.GARDNERS_INVENTORY_CRON,
+      biblioDeltaSchedule: env.GARDNERS_BIBLIO_DELTA_CRON,
+      avail13Schedule: env.GARDNERS_AVAIL13_CRON,
+      promotionsSchedule: env.GARDNERS_PROMOTIONS_CRON,
+      firmSaleSchedule: env.GARDNERS_FIRM_SALE_CRON,
+      isbnSlipsSchedule: env.GARDNERS_ISBN_SLIPS_CRON,
+      marketRestrictionsSchedule: env.GARDNERS_MARKET_RESTRICTIONS_CRON,
+      coversUpdateSchedule: env.GARDNERS_COVERS_UPDATE_CRON,
+    },
+    coverSync: {
+      batchSize: env.GARDNERS_COVER_SYNC_BATCH_SIZE,
+      delayMs: env.GARDNERS_COVER_SYNC_DELAY_MS,
+    },
   },
 } as const;
 
