@@ -5,6 +5,10 @@ import { coverService } from '../services/cover.service';
 import { excerptService } from '../services/excerpt.service';
 import { gardnersInventoryService } from '../services/gardners/gardners-inventory.service';
 import { gardnersBiblioService } from '../services/gardners/biblio.service';
+import { gardnersPromotionsService } from '../services/gardners/gardners-promotions.service';
+import { gardnersFirmSaleService } from '../services/gardners/gardners-firm-sale.service';
+import { gardnersIsbnSlipsService } from '../services/gardners/gardners-isbn-slips.service';
+import { gardnersMarketRestrictionsService } from '../services/gardners/gardners-market-restrictions.service';
 import { runFailedChunkCleanup } from './chunk-cleanup.cron';
 import { logger } from '../lib/logger';
 
@@ -136,4 +140,87 @@ export function startCron(): void {
   });
 
   logger.info('Gardners Biblio delta poll scheduled', { schedule: gardnersBiblioSchedule });
+
+  // ── Gardners Promotions poll ─────────────────────────────────────────────
+  const gardnersPromotionsSchedule = config.gardners.cron.promotionsSchedule;
+  if (!cron.validate(gardnersPromotionsSchedule)) {
+    throw new Error(`Invalid Gardners Promotions cron schedule: ${gardnersPromotionsSchedule}`);
+  }
+
+  cron.schedule(gardnersPromotionsSchedule, async () => {
+    logger.info('Polling Gardners Promotions feed');
+    try {
+      await gardnersPromotionsService.sync();
+    } catch (err) {
+      logger.error('Gardners Promotions poll failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  logger.info('Gardners Promotions poll scheduled', { schedule: gardnersPromotionsSchedule });
+
+  // ── Gardners isbn-slips poll ─────────────────────────────────────────────
+  const gardnersIsbnSlipsSchedule = config.gardners.cron.isbnSlipsSchedule;
+  if (!cron.validate(gardnersIsbnSlipsSchedule)) {
+    throw new Error(`Invalid Gardners isbn-slips cron schedule: ${gardnersIsbnSlipsSchedule}`);
+  }
+
+  cron.schedule(gardnersIsbnSlipsSchedule, async () => {
+    logger.info('Polling Gardners isbn-slips feed');
+    try {
+      await gardnersIsbnSlipsService.sync();
+    } catch (err) {
+      logger.error('Gardners isbn-slips poll failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  logger.info('Gardners isbn-slips poll scheduled', { schedule: gardnersIsbnSlipsSchedule });
+
+  // ── Gardners Firm Sale poll ──────────────────────────────────────────────
+  const gardnersFirmSaleSchedule = config.gardners.cron.firmSaleSchedule;
+  if (!cron.validate(gardnersFirmSaleSchedule)) {
+    throw new Error(`Invalid Gardners Firm Sale cron schedule: ${gardnersFirmSaleSchedule}`);
+  }
+
+  cron.schedule(gardnersFirmSaleSchedule, async () => {
+    logger.info('Polling Gardners Firm Sale feed');
+    try {
+      await gardnersFirmSaleService.sync();
+    } catch (err) {
+      logger.error('Gardners Firm Sale poll failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  logger.info('Gardners Firm Sale poll scheduled', { schedule: gardnersFirmSaleSchedule });
+
+  // ── Gardners market restrictions + regions poll ──────────────────────────
+  // Both run on the same schedule — REGIONS.CSV is tiny and cheap to check
+  // every time regardless of how rarely it actually changes.
+  const gardnersMarketRestrictionsSchedule = config.gardners.cron.marketRestrictionsSchedule;
+  if (!cron.validate(gardnersMarketRestrictionsSchedule)) {
+    throw new Error(
+      `Invalid Gardners market restrictions cron schedule: ${gardnersMarketRestrictionsSchedule}`,
+    );
+  }
+
+  cron.schedule(gardnersMarketRestrictionsSchedule, async () => {
+    logger.info('Polling Gardners market restrictions + regions feeds');
+    try {
+      await gardnersMarketRestrictionsService.syncRegions();
+      await gardnersMarketRestrictionsService.syncRestrictions();
+    } catch (err) {
+      logger.error('Gardners market restrictions poll failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  logger.info('Gardners market restrictions poll scheduled', {
+    schedule: gardnersMarketRestrictionsSchedule,
+  });
 }

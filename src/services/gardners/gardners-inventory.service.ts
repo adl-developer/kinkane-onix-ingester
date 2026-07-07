@@ -2,6 +2,7 @@ import { NewGardnersStock } from '../../db/schema';
 import { logger } from '../../lib/logger';
 import { gardnersFileQueue } from '../../queue';
 import { FetchFeedConfig, gardnersFetcher } from './fetcher.service';
+import { isValidIsbn13, parseDdMmYyyy, pick } from './parsing-utils';
 
 // edi.gardners.com's dedicated Bespoke Inventory account — full daily
 // catalogue price+stock snapshot, gated on a sibling .DONE file. Filenames
@@ -15,34 +16,6 @@ export const gardnersInventoryFeedConfig: FetchFeedConfig = {
     return files.filter((f) => /^IV\d{8}\.TXT$/i.test(f.filename));
   },
 };
-
-function pick(record: Record<string, string>, ...keys: string[]): string | undefined {
-  for (const key of keys) {
-    if (record[key] !== undefined) return record[key];
-  }
-  return undefined;
-}
-
-// The doc's date format is DD/MM/YYYY, with '00' for an unknown day —
-// treated the same as "no date" since a fictitious day-of-month isn't a
-// valid DATE value.
-function parseDdMmYyyy(value: string | undefined): string | null {
-  if (!value) return null;
-  const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(value.trim());
-  if (!match) return null;
-  const [, dd, mm, yyyy] = match;
-  if (dd === '00') return null;
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-// Real EAN-13 book identifiers start with 978/979 — roughly 1.8% of rows in
-// the live Bespoke feed are Gardners' own internal SKU codes for non-book
-// sundries (stationery, cards, etc.) and don't match any `books` row, so
-// they're skipped here rather than stored as bogus "ISBNs".
-function isValidIsbn13(value: string | undefined): value is string {
-  if (!value) return false;
-  return /^(978|979)\d{10}$/.test(value.trim());
-}
 
 /**
  * Maps one CSV row to a gardners_stock row, or null to skip it. Column

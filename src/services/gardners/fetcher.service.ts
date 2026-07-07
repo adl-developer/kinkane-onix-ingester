@@ -256,9 +256,35 @@ async function setChunkingComplete(
  * Called by the chunk worker after each chunk finishes. Resolves the fetch
  * log to 'completed' once every chunk has been accounted for — mirrors the
  * ingestion_jobs/ingestion_chunks SQL CASE pattern in chunk.worker.ts.
+ *
+ * Returns whether THIS call was the one that JUST completed the file (not
+ * merely "is the file complete", which would stay true forever after the
+ * real transition — comparing against the pre-update status via the `prev`
+ * CTE is what makes this fire exactly once even if a stray duplicate call
+ * comes in later, e.g. from a retried or leftover queue job), plus the
+ * file's own remoteModifiedAt — full-replace feeds use that as the
+ * mark-and-sweep cutoff (delete anything with an older syncedAt).
+ *
+ * Raw `db.execute()` rows aren't passed through Drizzle's column type
+ * mapping — remote_modified_at comes back as a string, not a Date, so it's
+ * revived before returning (same class of bug as the R2 JSON round-trip
+ * elsewhere: Postgres timestamp columns need an actual Date instance
+ * wherever Drizzle's binding expects one).
  */
-async function incrementProcessedChunks(logId: number): Promise<void> {
-  await db.execute(sql`
+async function incrementProcessedChunks(
+  logId: number,
+): Promise<{ isComplete: boolean; syncedAt: Date }> {
+  const rows = await db.execute<{
+    status: string;
+    was_completed: boolean;
+    remote_modified_at: string | null;
+  }>(sql`
+    WITH prev AS (
+      SELECT status = 'completed' AS was_completed
+      FROM gardners_fetch_log
+      WHERE id = ${logId}
+      FOR UPDATE
+    )
     UPDATE gardners_fetch_log
     SET
       processed_chunks = processed_chunks + 1,
@@ -270,8 +296,16 @@ async function incrementProcessedChunks(logId: number): Promise<void> {
         WHEN processed_chunks + 1 = total_chunks THEN NOW()
         ELSE completed_at
       END
-    WHERE id = ${logId}
+    FROM prev
+    WHERE gardners_fetch_log.id = ${logId}
+    RETURNING gardners_fetch_log.status, prev.was_completed, gardners_fetch_log.remote_modified_at
   `);
+
+  const row = rows[0];
+  return {
+    isComplete: row?.status === 'completed' && !row?.was_completed,
+    syncedAt: row?.remote_modified_at ? new Date(row.remote_modified_at) : new Date(),
+  };
 }
 
 async function markFetchCompleted(

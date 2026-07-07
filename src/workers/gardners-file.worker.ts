@@ -7,29 +7,65 @@ import { redis, gardnersChunkQueue } from '../queue';
 import { gardnersFetcher } from '../services/gardners/fetcher.service';
 import { parseGardnersCsv, ParseGardnersCsvOptions } from '../services/gardners/csv.service';
 import { mapInventoryRow } from '../services/gardners/gardners-inventory.service';
+import {
+  mapPromotionRow,
+  PROMOTIONS_COLUMNS,
+} from '../services/gardners/gardners-promotions.service';
+import {
+  mapFirmSaleRow,
+  FIRM_SALE_COLUMNS,
+} from '../services/gardners/gardners-firm-sale.service';
+import {
+  mapIsbnSlipRow,
+  ISBN_SLIPS_COLUMNS,
+} from '../services/gardners/gardners-isbn-slips.service';
+import {
+  mapRestrictionRow,
+  MARKET_RESTRICTIONS_COLUMNS,
+} from '../services/gardners/gardners-market-restrictions.service';
 import { storageService } from '../services/storage.service';
 import { logger } from '../lib/logger';
 import { GardnersFileJobData, GardnersFileJobResult } from '../types/queue';
-import { NewGardnersStock } from '../db/schema';
 
 // One case per feed type — matches the plan's "one worker, feed
-// discriminator" design. Only 'inventory' exists so far; Promotions,
-// Firmsale, isbn-slips, and mkres add more cases here later, each reusing
-// the same stream -> parse -> R2-chunk -> enqueue flow.
-function buildCsvOptions(
-  job: Job<GardnersFileJobData>,
-): ParseGardnersCsvOptions<NewGardnersStock> {
+// discriminator" design. The file worker itself doesn't care about the row
+// shape (it just batches whatever mapRow returns into R2 JSON chunks), so
+// this returns ParseGardnersCsvOptions<unknown> rather than committing to
+// one feed's row type.
+function buildCsvOptions(job: Job<GardnersFileJobData>): ParseGardnersCsvOptions<unknown> {
   const { feed, file } = job.data;
+  const ctx = { sourceFileKey: file.path, syncedAt: file.modifiedAt ?? new Date() };
 
   switch (feed) {
     case 'inventory':
       return {
         framed: true,
         mapRow: (record) =>
-          mapInventoryRow(record, {
-            sourceFileKey: file.path,
-            stockUpdatedAt: file.modifiedAt ?? new Date(),
-          }),
+          mapInventoryRow(record, { sourceFileKey: ctx.sourceFileKey, stockUpdatedAt: ctx.syncedAt }),
+      };
+    case 'promotions':
+      return {
+        framed: false,
+        columns: PROMOTIONS_COLUMNS,
+        mapRow: (record) => mapPromotionRow(record, ctx),
+      };
+    case 'firm_sale':
+      return {
+        framed: false,
+        columns: FIRM_SALE_COLUMNS,
+        mapRow: (record) => mapFirmSaleRow(record, ctx),
+      };
+    case 'isbn_slips':
+      return {
+        framed: false,
+        columns: ISBN_SLIPS_COLUMNS,
+        mapRow: (record) => mapIsbnSlipRow(record, ctx),
+      };
+    case 'market_restrictions':
+      return {
+        framed: false,
+        columns: MARKET_RESTRICTIONS_COLUMNS,
+        mapRow: (record) => mapRestrictionRow(record, ctx),
       };
     default:
       throw new Error(`Unsupported Gardners feed for file worker: ${feed}`);
@@ -73,13 +109,22 @@ async function processGardnersFileJob(
     }
 
     const summary = next.value;
-    if (summary.trailerCount !== null && summary.trailerCount !== summary.totalRows + summary.skippedRows) {
+    const totalLinesSeen = summary.totalRows + summary.skippedRows + summary.parseErrorRows;
+    if (summary.trailerCount !== null && summary.trailerCount !== totalLinesSeen) {
       logger.warn('Gardners feed row count does not match TRAILER count', {
         feed,
         file: file.filename,
         trailerCount: summary.trailerCount,
         totalRows: summary.totalRows,
         skippedRows: summary.skippedRows,
+        parseErrorRows: summary.parseErrorRows,
+      });
+    }
+    if (summary.parseErrorRows > 0) {
+      logger.warn('Gardners feed had unparseable rows', {
+        feed,
+        file: file.filename,
+        parseErrorRows: summary.parseErrorRows,
       });
     }
 

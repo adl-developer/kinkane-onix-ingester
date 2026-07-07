@@ -1,5 +1,6 @@
 import { Readable } from 'stream';
 import { parse } from 'csv-parse';
+import { logger } from '../../lib/logger';
 
 export interface ParseGardnersCsvOptions<T> {
   // Framed feeds (currently only the Inventory/.STK files) are wrapped in a
@@ -17,6 +18,10 @@ export interface ParseGardnersCsvOptions<T> {
 export interface ParseGardnersCsvSummary {
   totalRows: number;
   skippedRows: number;
+  // Rows csv-parse itself couldn't parse at all (see skip_records_with_error
+  // below) — distinct from skippedRows, which is mapRow rejecting an
+  // otherwise well-formed row (e.g. a non-ISBN SKU code).
+  parseErrorRows: number;
   // Only set for framed feeds — the file's own claimed row count, checked
   // against totalRows as a sanity check (mismatches are logged by the
   // caller, not treated as fatal — a single off-by-one shouldn't block
@@ -40,8 +45,27 @@ export async function* parseGardnersCsv<T>(
   options: ParseGardnersCsvOptions<T>,
   batchSize = 1000,
 ): AsyncGenerator<T[], ParseGardnersCsvSummary> {
+  // Vendor CSVs are rarely perfectly RFC4180-compliant — verified live
+  // against Gardners' own GARDPROM13.CSV, which has a title field like
+  // `""THE IMPORTANCE OF BEING EARNEST""` (quote marks embedded in the
+  // title itself, not escaped per spec). relax_quotes handles some
+  // malformed-quote shapes but not all; skip_records_with_error is the
+  // real safety net — a handful of genuinely unparseable rows in a
+  // multi-million-row file should be skipped and logged, not crash the
+  // entire feed.
+  let parseErrorRows = 0;
   const parser = stream.pipe(
-    parse({ relax_column_count: true, skip_empty_lines: true, trim: true }),
+    parse({
+      relax_column_count: true,
+      relax_quotes: true,
+      skip_empty_lines: true,
+      skip_records_with_error: true,
+      trim: true,
+      on_skip: (err) => {
+        parseErrorRows++;
+        logger.warn('Skipped unparseable Gardners CSV row', { error: err?.message });
+      },
+    }),
   );
 
   let columns = options.framed ? undefined : options.columns;
@@ -93,5 +117,5 @@ export async function* parseGardnersCsv<T>(
     yield batch;
   }
 
-  return { totalRows, skippedRows, trailerCount };
+  return { totalRows, skippedRows, parseErrorRows, trailerCount };
 }
