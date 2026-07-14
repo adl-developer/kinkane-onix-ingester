@@ -1,3 +1,8 @@
+/**
+ * Owned and migrated by `server` (see server/src/db/schema/ and
+ * server/drizzle/) — this is a read-only copy for onix_ingester's own
+ * type-safe queries/writes. Never add migrations here.
+ */
 import { pgTable, pgEnum, serial, integer, varchar, text, timestamp, index, uniqueIndex } from 'drizzle-orm/pg-core';
 
 export const gardnersFeedEnum = pgEnum('gardners_feed', [

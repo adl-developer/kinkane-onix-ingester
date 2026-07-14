@@ -10,7 +10,7 @@
 
 ### Features
 
-* add Avail13 hourly stock feed (Feed 3) ([0c07861](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/0c078612885f8868a2de0dad1f9728e0703694df))
+* add Avail13 hourly stock feed (Feed 3) ([7d3fc42](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/7d3fc4217c1af9c1571648e6b9d1801ec2f66221))
 * add Bespoke Inventory feed ingestion (CSV chunk-queue pattern) ([8fbea65](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/8fbea655bdb24cc163513a05200cb0298ce52b5a))
 * add DB schema and SFTP/FTP fetcher framework for Gardners feeds ([3356d09](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/3356d090a9c1fac2bb5a77a61d5ab05c68b8368d))
 * add ONIX Biblio feed ingestion + fix SFTP throughput and retry bugs ([5ebb1f8](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/5ebb1f8d4f31d9d9ac08f6cc454ceecc5df17621))

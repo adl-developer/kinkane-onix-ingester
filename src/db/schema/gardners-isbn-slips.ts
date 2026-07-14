@@ -1,3 +1,8 @@
+/**
+ * Owned and migrated by `server` (see server/src/db/schema/ and
+ * server/drizzle/) — this is a read-only copy for onix_ingester's own
+ * type-safe queries/writes. Never add migrations here.
+ */
 import { pgTable, varchar, timestamp, index } from 'drizzle-orm/pg-core';
 
 // "Slipped" ISBNs — a title has been replaced by a new edition. oldIsbn13 is
