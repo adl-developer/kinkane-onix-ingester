@@ -10,6 +10,7 @@ import { gardnersFirmSaleService } from '../services/gardners/gardners-firm-sale
 import { gardnersIsbnSlipsService } from '../services/gardners/gardners-isbn-slips.service';
 import { gardnersMarketRestrictionsService } from '../services/gardners/gardners-market-restrictions.service';
 import { gardnersAvail13Service } from '../services/gardners/gardners-avail13.service';
+import { gardnersCoverService } from '../services/gardners/gardners-cover-sync.service';
 import { runFailedChunkCleanup } from './chunk-cleanup.cron';
 import { logger } from '../lib/logger';
 
@@ -52,6 +53,17 @@ export function startCron(): void {
 
   cron.schedule(coverSchedule, async () => {
     logger.info('Starting cover fetch cron');
+    // Gardners runs first — higher authority, ~99% catalogue coverage.
+    // Google Books' own candidate query (coverUrl IS NULL) naturally only
+    // picks up whatever Gardners didn't find moments earlier in this same
+    // tick, so the two need no other coordination.
+    try {
+      await gardnersCoverService.syncFullCatalogue();
+    } catch (err) {
+      logger.error('Gardners cover full-catalogue sync failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
     try {
       await coverService.fetchMissingCovers();
     } catch (err) {
@@ -245,4 +257,26 @@ export function startCron(): void {
   });
 
   logger.info('Gardners Avail13 poll scheduled', { schedule: gardnersAvail13Schedule });
+
+  // ── Gardners cover image weekly update poll ──────────────────────────────
+  // syncFullCatalogue() (backfill for existing books) runs as part of the
+  // main cover-fetch cron above, ahead of the Google Books fallback. This
+  // one handles new/changed covers from Gardners' own weekly zip bundles.
+  const gardnersCoversUpdateSchedule = config.gardners.cron.coversUpdateSchedule;
+  if (!cron.validate(gardnersCoversUpdateSchedule)) {
+    throw new Error(`Invalid Gardners covers update cron schedule: ${gardnersCoversUpdateSchedule}`);
+  }
+
+  cron.schedule(gardnersCoversUpdateSchedule, async () => {
+    logger.info('Polling Gardners cover update feed');
+    try {
+      await gardnersCoverService.syncWeeklyUpdates();
+    } catch (err) {
+      logger.error('Gardners cover update poll failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  logger.info('Gardners covers update poll scheduled', { schedule: gardnersCoversUpdateSchedule });
 }
