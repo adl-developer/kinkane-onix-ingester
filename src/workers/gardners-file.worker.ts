@@ -23,6 +23,11 @@ import {
   mapRestrictionRow,
   MARKET_RESTRICTIONS_COLUMNS,
 } from '../services/gardners/gardners-market-restrictions.service';
+import {
+  mapAvail13Row,
+  AVAIL13_COLUMNS,
+  avail13SourceForFilename,
+} from '../services/gardners/gardners-avail13.service';
 import { storageService } from '../services/storage.service';
 import { logger } from '../lib/logger';
 import { GardnersFileJobData, GardnersFileJobResult } from '../types/queue';
@@ -67,6 +72,15 @@ function buildCsvOptions(job: Job<GardnersFileJobData>): ParseGardnersCsvOptions
         columns: MARKET_RESTRICTIONS_COLUMNS,
         mapRow: (record) => mapRestrictionRow(record, ctx),
       };
+    case 'avail13': {
+      const source = avail13SourceForFilename(file.filename);
+      return {
+        framed: false,
+        columns: AVAIL13_COLUMNS,
+        mapRow: (record) =>
+          mapAvail13Row(record, { sourceFileKey: ctx.sourceFileKey, stockUpdatedAt: ctx.syncedAt, source }),
+      };
+    }
     default:
       throw new Error(`Unsupported Gardners feed for file worker: ${feed}`);
   }

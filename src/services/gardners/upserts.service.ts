@@ -17,11 +17,19 @@ import {
 import { logger } from '../../lib/logger';
 
 /**
- * Bulk upsert for gardners_stock, keyed on isbn13. Only overwrites an
- * existing row if the incoming data is at least as fresh as what's already
- * stored (stockUpdatedAt comparison) — protects against an in-flight daily
- * Inventory run racing an hourly Avail13 run and clobbering newer data with
- * stale data. See gardners-stock.ts's doc comment for the full rationale.
+ * Bulk upsert for gardners_stock, keyed on isbn13. Two feeds write here —
+ * Inventory (price, discount, stock qty, report code/date) and Avail13
+ * (stock qty only, hourly). Only overwrites existing data if the incoming
+ * row is at least as fresh as what's stored (stockUpdatedAt comparison) —
+ * protects against an in-flight daily Inventory run racing an hourly
+ * Avail13 run and clobbering newer data with stale data.
+ *
+ * Price/discount/report fields are gated on `source = 'inventory'` in
+ * addition to freshness — Avail13 rows always carry null for those fields
+ * (it doesn't have that data at all), so a plain freshness-only gate would
+ * let a fresher Avail13 row wipe out real price/discount data with nulls.
+ * stockQty/source/sourceFileKey/stockUpdatedAt are freshness-gated only,
+ * since either feed can legitimately be the most current stock number.
  */
 async function upsertStockRows(
   rows: NewGardnersStock[],
@@ -35,11 +43,11 @@ async function upsertStockRows(
       .onConflictDoUpdate({
         target: gardnersStock.isbn13,
         set: {
-          rrpGbp: sql`CASE WHEN excluded.stock_updated_at >= gardners_stock.stock_updated_at THEN excluded.rrp_gbp ELSE gardners_stock.rrp_gbp END`,
-          discountPercent: sql`CASE WHEN excluded.stock_updated_at >= gardners_stock.stock_updated_at THEN excluded.discount_percent ELSE gardners_stock.discount_percent END`,
+          rrpGbp: sql`CASE WHEN excluded.source = 'inventory' AND excluded.stock_updated_at >= gardners_stock.stock_updated_at THEN excluded.rrp_gbp ELSE gardners_stock.rrp_gbp END`,
+          discountPercent: sql`CASE WHEN excluded.source = 'inventory' AND excluded.stock_updated_at >= gardners_stock.stock_updated_at THEN excluded.discount_percent ELSE gardners_stock.discount_percent END`,
           stockQty: sql`CASE WHEN excluded.stock_updated_at >= gardners_stock.stock_updated_at THEN excluded.stock_qty ELSE gardners_stock.stock_qty END`,
-          reportCode: sql`CASE WHEN excluded.stock_updated_at >= gardners_stock.stock_updated_at THEN excluded.report_code ELSE gardners_stock.report_code END`,
-          reportDate: sql`CASE WHEN excluded.stock_updated_at >= gardners_stock.stock_updated_at THEN excluded.report_date ELSE gardners_stock.report_date END`,
+          reportCode: sql`CASE WHEN excluded.source = 'inventory' AND excluded.stock_updated_at >= gardners_stock.stock_updated_at THEN excluded.report_code ELSE gardners_stock.report_code END`,
+          reportDate: sql`CASE WHEN excluded.source = 'inventory' AND excluded.stock_updated_at >= gardners_stock.stock_updated_at THEN excluded.report_date ELSE gardners_stock.report_date END`,
           source: sql`CASE WHEN excluded.stock_updated_at >= gardners_stock.stock_updated_at THEN excluded.source ELSE gardners_stock.source END`,
           sourceFileKey: sql`CASE WHEN excluded.stock_updated_at >= gardners_stock.stock_updated_at THEN excluded.source_file_key ELSE gardners_stock.source_file_key END`,
           stockUpdatedAt: sql`GREATEST(excluded.stock_updated_at, gardners_stock.stock_updated_at)`,

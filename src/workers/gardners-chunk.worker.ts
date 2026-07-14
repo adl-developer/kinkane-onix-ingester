@@ -28,7 +28,12 @@ async function upsertChunk(
   chunkKey: string,
 ): Promise<{ processed: number; failed: number }> {
   switch (feed) {
-    case 'inventory': {
+    case 'inventory':
+    case 'avail13': {
+      // Both feeds write to gardners_stock via the same source-aware
+      // upsert (see upsertStockRows's doc comment) — Avail13 rows carry
+      // null price/discount/report fields, so those columns are gated on
+      // source = 'inventory' inside the upsert itself, not here.
       const rows = await storageService.getJson<NewGardnersStock[]>(chunkKey);
       const revived = rows.map((r) => reviveDate(r, 'stockUpdatedAt'));
       const result = await gardnersUpserts.upsertStockRows(revived);

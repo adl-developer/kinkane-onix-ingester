@@ -9,6 +9,7 @@ import { gardnersPromotionsService } from '../services/gardners/gardners-promoti
 import { gardnersFirmSaleService } from '../services/gardners/gardners-firm-sale.service';
 import { gardnersIsbnSlipsService } from '../services/gardners/gardners-isbn-slips.service';
 import { gardnersMarketRestrictionsService } from '../services/gardners/gardners-market-restrictions.service';
+import { gardnersAvail13Service } from '../services/gardners/gardners-avail13.service';
 import { runFailedChunkCleanup } from './chunk-cleanup.cron';
 import { logger } from '../lib/logger';
 
@@ -223,4 +224,25 @@ export function startCron(): void {
   logger.info('Gardners market restrictions poll scheduled', {
     schedule: gardnersMarketRestrictionsSchedule,
   });
+
+  // ── Gardners Avail13 hourly stock poll ───────────────────────────────────
+  // Thin addition on top of gardners_stock (already populated by Inventory)
+  // — see upsertStockRows's doc comment for how the two feeds coexist.
+  const gardnersAvail13Schedule = config.gardners.cron.avail13Schedule;
+  if (!cron.validate(gardnersAvail13Schedule)) {
+    throw new Error(`Invalid Gardners Avail13 cron schedule: ${gardnersAvail13Schedule}`);
+  }
+
+  cron.schedule(gardnersAvail13Schedule, async () => {
+    logger.info('Polling Gardners Avail13 feed');
+    try {
+      await gardnersAvail13Service.sync();
+    } catch (err) {
+      logger.error('Gardners Avail13 poll failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  });
+
+  logger.info('Gardners Avail13 poll scheduled', { schedule: gardnersAvail13Schedule });
 }
