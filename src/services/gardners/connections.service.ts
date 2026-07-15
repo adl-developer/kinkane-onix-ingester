@@ -1,4 +1,4 @@
-import { Readable, PassThrough } from 'stream';
+import { Readable, Writable } from 'stream';
 import SftpClient from 'ssh2-sftp-client';
 import { Client as FtpClient } from 'basic-ftp';
 import { config } from '../../config';
@@ -105,12 +105,31 @@ function ftpClientAdapter(client: FtpClient): GardnersRemoteClient {
       }
     },
     async readStream(path) {
-      // basic-ftp's downloadTo only accepts a Writable destination — bridge
-      // it into a Readable via PassThrough so callers get a stream to pipe
-      // from, same shape as the SFTP adapter's createReadStream.
-      const passthrough = new PassThrough();
-      client.downloadTo(passthrough, path).catch((err) => passthrough.destroy(err));
-      return passthrough;
+      // basic-ftp only allows one in-flight command per Client — a fire-
+      // and-forget downloadTo() into a live PassThrough (returned before
+      // the transfer finishes) races the *next* command issued on this
+      // same client, since the caller has no way to know the download is
+      // still in flight. That race is real, not theoretical: it surfaced
+      // live as "User launched a task while another one is still running"
+      // once callers stopped pacing requests with an inter-call delay.
+      // Fully awaiting downloadTo() before returning fixes it, but only
+      // works if the destination never backpressures — the default
+      // highWaterMark PassThrough would otherwise deadlock downloadTo()
+      // for anything past ~16KB, since nothing reads from it until this
+      // function returns. Sinking into a plain array first (unbounded,
+      // never backpressures) avoids that, then handing back a real
+      // Readable once the whole transfer — and the client's single
+      // command slot — is done. Only used for individually-small files
+      // (cover images); large feeds go through downloadToFile instead.
+      const chunks: Buffer[] = [];
+      const sink = new Writable({
+        write(chunk: Buffer, _enc, callback) {
+          chunks.push(chunk);
+          callback();
+        },
+      });
+      await client.downloadTo(sink, path);
+      return Readable.from(Buffer.concat(chunks));
     },
     async size(path) {
       return client.size(path);

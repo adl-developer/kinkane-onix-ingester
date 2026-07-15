@@ -5,12 +5,13 @@
 
 * commit missing Gardners npm dependencies to package.json ([f749ebf](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/f749ebf1b8fe89c4e05acd51f92c50fc7fa812b1))
 * pin embedding output dimension and run backfill in background ([0c9b73b](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/0c9b73b3b1c3a883a2471cf87846bdb71466595f))
+* stop concurrent FTP cover downloads from crashing the client ([5889dce](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/5889dcef5f593b381239f11588428e7168c5ef17))
 * wire up Gardners config, schema barrel, and R2 stream upload ([f7ee536](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/f7ee5363c17d389e46408802519f1bca7e4aca88))
 
 
 ### Features
 
-* add admin endpoint to bootstrap the full Gardners catalogue ([c70dd1b](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/c70dd1bac24b8d8be3cd35e093aa05d39965376d))
+* add admin endpoint to bootstrap the full Gardners catalogue ([8e763df](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/8e763dfc699a1d2e9e1915a6fcaea5ada06cc45f))
 * add Avail13 hourly stock feed (Feed 3) ([7d3fc42](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/7d3fc4217c1af9c1571648e6b9d1801ec2f66221))
 * add Bespoke Inventory feed ingestion (CSV chunk-queue pattern) ([8fbea65](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/8fbea655bdb24cc163513a05200cb0298ce52b5a))
 * add DB schema and SFTP/FTP fetcher framework for Gardners feeds ([3356d09](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/3356d090a9c1fac2bb5a77a61d5ab05c68b8368d))
