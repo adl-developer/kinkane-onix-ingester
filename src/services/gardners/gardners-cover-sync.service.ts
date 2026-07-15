@@ -72,7 +72,7 @@ export async function processUpdateZip(file: RemoteFileDescriptor): Promise<void
 
       await db
         .update(books)
-        .set({ coverUrl: publicUrlForKey(key), coverFetchedAt: new Date() })
+        .set({ coverUrl: publicUrlForKey(key), gardnersCoverCheckedAt: new Date() })
         .where(eq(books.isbn13, isbn13));
 
       processed++;
@@ -121,12 +121,12 @@ async function syncWeeklyUpdates(): Promise<void> {
 
 /**
  * Backfills covers for existing books from /Books/Full, one small batch per
- * call — mirrors cover.service.ts's Google Books fetch exactly (same
- * candidate query shape, same "always set coverFetchedAt so we don't keep
- * retrying" rule), so the two are interchangeable from the storefront's
- * point of view and naturally sequence when both run in the same cron tick:
- * whatever Gardners fills in here is excluded from Google Books' candidate
- * query moments later.
+ * call. Tracks its own attempt cadence via gardnersCoverCheckedAt, separate
+ * from coverFetchedAt (which the Google Books fallback owns) — this is what
+ * lets Google Books act as a true last resort: its candidate query requires
+ * gardnersCoverCheckedAt to already be set, so it never races this function
+ * for the same untouched books, only picks up what this function couldn't
+ * find.
  *
  * Batch-sized deliberately, not a full-catalogue walk in one call — for an
  * initial bulk catch-up across ~2M titles, invoke this repeatedly (e.g. a
@@ -145,8 +145,8 @@ async function syncFullCatalogue(): Promise<void> {
       and(
         sql`${books.isbn13} IS NOT NULL`,
         or(
-          isNull(books.coverFetchedAt),
-          and(isNull(books.coverUrl), lt(books.coverFetchedAt, thirtyDaysAgo)),
+          isNull(books.gardnersCoverCheckedAt),
+          and(isNull(books.coverUrl), lt(books.gardnersCoverCheckedAt, thirtyDaysAgo)),
         ),
       ),
     )
@@ -170,14 +170,17 @@ async function syncFullCatalogue(): Promise<void> {
         const size = await client.size(remotePath).catch(() => null);
         if (size === null) {
           notFound++;
-          await db.update(books).set({ coverFetchedAt: new Date() }).where(eq(books.id, book.id));
+          await db
+            .update(books)
+            .set({ gardnersCoverCheckedAt: new Date() })
+            .where(eq(books.id, book.id));
         } else {
           const stream = await client.readStream(remotePath);
           const key = r2KeyForCover(isbn13);
           await storageService.uploadStream(key, stream, 'image/jpeg', size);
           await db
             .update(books)
-            .set({ coverUrl: publicUrlForKey(key), coverFetchedAt: new Date() })
+            .set({ coverUrl: publicUrlForKey(key), gardnersCoverCheckedAt: new Date() })
             .where(eq(books.id, book.id));
           fetched++;
         }
@@ -188,7 +191,10 @@ async function syncFullCatalogue(): Promise<void> {
           isbn13,
           error: err instanceof Error ? err.message : String(err),
         });
-        await db.update(books).set({ coverFetchedAt: new Date() }).where(eq(books.id, book.id));
+        await db
+          .update(books)
+          .set({ gardnersCoverCheckedAt: new Date() })
+          .where(eq(books.id, book.id));
       }
 
       if (delayMs > 0) {

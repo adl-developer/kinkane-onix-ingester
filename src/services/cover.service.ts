@@ -122,7 +122,13 @@ export const coverService = {
     const { coverFetchBatchSize, coverFetchDelayMs } = config.cron;
     const thirtyDaysAgo = new Date(Date.now() - THIRTY_DAYS_MS);
 
-    // Books that have never been tried, OR were tried 30+ days ago and still have no cover
+    // Last resort only: for books with an ISBN13, Gardners must have already
+    // checked (gardnersCoverCheckedAt set) and found nothing, so this never
+    // races gardnersCoverService.syncFullCatalogue for the same untouched
+    // books. Books with no ISBN13 skip that gate entirely — Gardners has no
+    // way to look those up at all, so Google Books is the only option.
+    // Either way, only considers books Google Books itself hasn't tried yet
+    // (or tried 30+ days ago and still has no cover).
     const candidates = await db
       .select({
         id: books.id,
@@ -131,12 +137,10 @@ export const coverService = {
       })
       .from(books)
       .where(
-        or(
-          isNull(books.coverFetchedAt),
-          and(
-            isNull(books.coverUrl),
-            lt(books.coverFetchedAt, thirtyDaysAgo),
-          ),
+        and(
+          isNull(books.coverUrl),
+          or(isNull(books.isbn13), sql`${books.gardnersCoverCheckedAt} IS NOT NULL`),
+          or(isNull(books.coverFetchedAt), lt(books.coverFetchedAt, thirtyDaysAgo)),
         ),
       )
       .limit(coverFetchBatchSize);

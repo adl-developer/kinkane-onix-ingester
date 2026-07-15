@@ -82,11 +82,18 @@ export const books = pgTable(
     embedding: vector('embedding', { dimensions: 768 }),
     embeddedAt: timestamp('embedded_at', { withTimezone: true }),
 
-    // Cover image fetched from Google Books API by background job
+    // Cover image, sourced from Gardners first and Google Books as a fallback
     coverUrl: varchar('cover_url', { length: 500 }),
-    // Set whenever a fetch is attempted (even if no cover was found) so we
-    // don't keep retrying. NULL = never tried. Retried after 30 days if still no cover.
+    // Set only by the Google Books fallback whenever IT attempts a fetch (even
+    // if no cover was found), so it doesn't keep retrying. NULL = Google Books
+    // hasn't tried yet. Retried after 30 days if still no cover. Google Books
+    // only considers a book once gardnersCoverCheckedAt is set — see below.
     coverFetchedAt: timestamp('cover_fetched_at', { withTimezone: true }),
+    // Set only by Gardners' cover full-catalogue probe (gardners-cover-sync
+    // .service.ts), independent of coverFetchedAt above. Google Books' fallback
+    // query requires this to be set (and coverUrl still null) before it will
+    // ever try a book — this is what makes Google Books a true last resort.
+    gardnersCoverCheckedAt: timestamp('gardners_cover_checked_at', { withTimezone: true }),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),
