@@ -5,7 +5,7 @@
 
 * commit missing Gardners npm dependencies to package.json ([f749ebf](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/f749ebf1b8fe89c4e05acd51f92c50fc7fa812b1))
 * pin embedding output dimension and run backfill in background ([0c9b73b](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/0c9b73b3b1c3a883a2471cf87846bdb71466595f))
-* stop concurrent FTP cover downloads from crashing the client ([5889dce](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/5889dcef5f593b381239f11588428e7168c5ef17))
+* stop concurrent FTP cover downloads from crashing the client ([42a30fa](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/42a30fac09f830cb014a0133a01d5f2331127852))
 * wire up Gardners config, schema barrel, and R2 stream upload ([f7ee536](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/f7ee5363c17d389e46408802519f1bca7e4aca88))
 
 
@@ -22,3 +22,4 @@
 * backfill bookId on gardners_stock rows after each chunk upsert ([50f7d4b](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/50f7d4be765ac24789d3311cc5247f3ebc0f4e9d))
 * make Google Books cover fallback a true last resort ([b355637](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/b355637bb381f5bffc47790ab26a39e57c10511b))
 * move chunk payloads from PostgreSQL JSONB to R2 object storage ([bcf2404](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/bcf240446d3f6b12fd6d8615110ca147a168afb0))
+* run the cover backfill over multiple concurrent FTP connections ([dea5063](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/dea5063e22db393757b53deee007abbf4f96b324))

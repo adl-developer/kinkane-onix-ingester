@@ -9,7 +9,7 @@ router.use(requireAdminToken);
 
 /**
  * POST /gardners/bootstrap
- * Body: { coverBatchSize?: number, coverDelayMs?: number }
+ * Body: { coverBatchSize?: number, coverConcurrency?: number }
  * One-shot fresh-database bootstrap of the entire Gardners catalogue —
  * ONIX bibliographic data, stock/pricing, promotions, firm-sale flags,
  * ISBN redirects, market restrictions, hourly availability, and cover
