@@ -128,14 +128,19 @@ async function syncWeeklyUpdates(): Promise<void> {
  * for the same untouched books, only picks up what this function couldn't
  * find.
  *
- * Batch-sized deliberately, not a full-catalogue walk in one call — for an
- * initial bulk catch-up across ~2M titles, invoke this repeatedly (e.g. a
- * small loop in a one-off script) or temporarily raise
- * GARDNERS_COVER_SYNC_BATCH_SIZE, same as this codebase already does for
- * the embedding backfill.
+ * Batch-sized deliberately, not a full-catalogue walk in one call — the
+ * normal cron only calls this once a day, so for an initial bulk catch-up
+ * across ~2M titles, callers (e.g. gardners-bootstrap.service.ts) invoke it
+ * repeatedly in a loop, optionally overriding batchSize/delayMs to run much
+ * faster than the day-to-day default. Returns how many candidates this call
+ * found so a caller knows when to stop looping.
  */
-async function syncFullCatalogue(): Promise<void> {
-  const { batchSize, delayMs } = config.gardners.coverSync;
+async function syncFullCatalogue(overrides?: {
+  batchSize?: number;
+  delayMs?: number;
+}): Promise<number> {
+  const batchSize = overrides?.batchSize ?? config.gardners.coverSync.batchSize;
+  const delayMs = overrides?.delayMs ?? config.gardners.coverSync.delayMs;
   const thirtyDaysAgo = new Date(Date.now() - THIRTY_DAYS_MS);
 
   const candidates = await db
@@ -154,7 +159,7 @@ async function syncFullCatalogue(): Promise<void> {
 
   if (candidates.length === 0) {
     logger.info('Gardners cover full-catalogue sync: no books need covers');
-    return;
+    return 0;
   }
 
   let fetched = 0;
@@ -204,6 +209,7 @@ async function syncFullCatalogue(): Promise<void> {
   });
 
   logger.info('Gardners cover full-catalogue sync: batch complete', { fetched, notFound, errors });
+  return candidates.length;
 }
 
 export const gardnersCoverService = { syncWeeklyUpdates, syncFullCatalogue };

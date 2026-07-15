@@ -60,7 +60,7 @@ function r2KeyFor(feed: 'biblio_delta' | 'biblio_full', file: RemoteFileDescript
 async function fetchAndLandInR2(
   cfg: FetchFeedConfig,
   file: RemoteFileDescriptor,
-): Promise<void> {
+): Promise<string> {
   const r2Key = r2KeyFor(cfg.feed as 'biblio_delta' | 'biblio_full', file);
   const logId = await gardnersFetcher.claimFile(cfg.feed, file);
   const localZipPath = join(tmpdir(), `gardners-${cfg.feed}-${logId}.zip`);
@@ -92,6 +92,7 @@ async function fetchAndLandInR2(
       filename: file.filename,
       r2Key,
     });
+    return r2Key;
   } catch (err) {
     const error = err instanceof Error ? err : new Error(String(err));
     await gardnersFetcher.markFetchFailed(logId, error);
@@ -114,19 +115,25 @@ async function syncDelta(): Promise<void> {
   }
 }
 
-async function syncFull(): Promise<void> {
+/**
+ * Returns the R2 key the file was landed under, or null if there was no
+ * unprocessed full file to fetch — callers that need ingestion to actually
+ * run (rather than waiting for the next R2_POLL_CRON tick) should pass the
+ * key straight to ingestionService.triggerIngestion().
+ */
+async function syncFull(): Promise<string | null> {
   const files = await gardnersFetcher.listUnprocessedFiles(gardnersBiblioFullFeedConfig);
 
   if (files.length === 0) {
     logger.info('No new Gardners Biblio full files found');
-    return;
+    return null;
   }
 
   // Only the single latest full file, even if more than one is somehow
   // unprocessed — this is an expensive, rarely-run operation, not something
   // to fan out across multiple ~1.7GB downloads in one call.
   const [file] = files;
-  await fetchAndLandInR2(gardnersBiblioFullFeedConfig, file);
+  return fetchAndLandInR2(gardnersBiblioFullFeedConfig, file);
 }
 
 export const gardnersBiblioService = { syncDelta, syncFull };
