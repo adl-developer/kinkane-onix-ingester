@@ -23,7 +23,7 @@ export const ingestionService = {
         new Error(
           `Job already exists for ${fileKey} (jobId=${existing.id}, status=${existing.status})`,
         ),
-        { statusCode: 409 },
+        { statusCode: 409, jobId: existing.id, status: existing.status },
       );
     }
 

@@ -28,8 +28,16 @@ function slugify(text: string): string {
 
 async function upsertBook(book: OnixProduct): Promise<number | null> {
   if (book.notificationType === '05') {
-    if (book.isbn13) await db.delete(books).where(eq(books.isbn13, book.isbn13));
-    else await db.delete(books).where(eq(books.recordReference, book.recordReference));
+    // ONIX "delete" notification — the title has been withdrawn upstream.
+    // Soft-delete rather than actually deleting the row: a real delete
+    // cascades to a user's posts/reviews, reading-list entries, and
+    // interaction history for that book (see server's books.ts schema for
+    // the FKs), silently destroying their content. isRemoved lets those
+    // survive; un-set automatically below if the title reappears later.
+    const match = book.isbn13
+      ? eq(books.isbn13, book.isbn13)
+      : eq(books.recordReference, book.recordReference);
+    await db.update(books).set({ isRemoved: true, removedAt: new Date() }).where(match);
     return null;
   }
 
@@ -59,6 +67,10 @@ async function upsertBook(book: OnixProduct): Promise<number | null> {
     availabilityCode: book.availabilityCode,
     returnsCode: book.returnsCode,
     orderTime: book.orderTime,
+    // A normal notification for this recordReference means it's active
+    // again — clears any prior withdrawal (e.g. a reissued title).
+    isRemoved: false,
+    removedAt: null,
     updatedAt: new Date(),
   };
 

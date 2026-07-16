@@ -6,6 +6,7 @@ import {
   PutObjectCommand,
   DeleteObjectCommand,
 } from '@aws-sdk/client-s3';
+import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
 import { Readable } from 'stream';
 import { config } from '../config';
@@ -89,6 +90,52 @@ class StorageService {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Streams a Readable directly into R2 without buffering it fully in memory.
+   * Requires a known Content-Length (e.g. from an SFTP `stat()`/FTP `size()`
+   * call) — use this only when the exact byte size is known upfront. For
+   * streams whose final size isn't known (e.g. the unzipped output of a
+   * ZIP entry, where only the compressed size is known beforehand), use
+   * uploadStreamMultipart instead.
+   */
+  async uploadStream(
+    key: string,
+    stream: Readable,
+    contentType: string,
+    contentLength: number,
+  ): Promise<void> {
+    const command = new PutObjectCommand({
+      Bucket: this.bucket,
+      Key: key,
+      Body: stream,
+      ContentType: contentType,
+      ContentLength: contentLength,
+    });
+    await this.s3.send(command);
+  }
+
+  /**
+   * Streams a Readable of unknown final length into R2 via S3 multipart
+   * upload — plain PutObjectCommand needs a Content-Length upfront, which
+   * we don't have for e.g. the decompressed output of a ZIP entry (only the
+   * compressed size is known before reading it). @aws-sdk/lib-storage's
+   * Upload buffers only `partSize` bytes at a time (default 5MB) rather
+   * than the whole stream, so this stays memory-safe even for the ~1.7GB
+   * Gardners ONIX full-catalogue file.
+   */
+  async uploadStreamMultipart(key: string, stream: Readable, contentType: string): Promise<void> {
+    const upload = new Upload({
+      client: this.s3,
+      params: {
+        Bucket: this.bucket,
+        Key: key,
+        Body: stream,
+        ContentType: contentType,
+      },
+    });
+    await upload.done();
   }
 
   /**
