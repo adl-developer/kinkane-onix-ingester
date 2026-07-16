@@ -43,6 +43,17 @@ const envSchema = z.object({
   JELLYBOOKS_API_KEY: z.string().optional(),
   JELLYBOOKS_BASE_URL: z.string().url().default('https://www.jellybooks.com'),
 
+  // Master switch for all Gardners cron jobs and the POST /gardners/bootstrap
+  // endpoint. Defaults to disabled so deploying this doesn't start pulling
+  // ~2M rows + cover images into a database that isn't sized for it — only
+  // the literal string 'true' enables it, anything else (unset, 'false',
+  // '1', etc.) leaves it off.
+  GARDNERS_INGESTION_ENABLED: z
+    .string()
+    .optional()
+    .default('false')
+    .transform((v) => v === 'true'),
+
   // Gardners Books — Bespoke Inventory SFTP (edi.gardners.com)
   GARDNERS_BESPOKE_SFTP_HOST: z.string().min(1),
   GARDNERS_BESPOKE_SFTP_PORT: z.coerce.number().default(22),
@@ -134,6 +145,7 @@ export const config = {
     baseUrl: env.JELLYBOOKS_BASE_URL,
   },
   gardners: {
+    ingestionEnabled: env.GARDNERS_INGESTION_ENABLED,
     bespokeSftp: {
       host: env.GARDNERS_BESPOKE_SFTP_HOST,
       port: env.GARDNERS_BESPOKE_SFTP_PORT,

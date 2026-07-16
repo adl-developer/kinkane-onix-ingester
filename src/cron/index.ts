@@ -57,12 +57,14 @@ export function startCron(): void {
     // Google Books' own candidate query (coverUrl IS NULL) naturally only
     // picks up whatever Gardners didn't find moments earlier in this same
     // tick, so the two need no other coordination.
-    try {
-      await gardnersCoverService.syncFullCatalogue();
-    } catch (err) {
-      logger.error('Gardners cover full-catalogue sync failed', {
-        error: err instanceof Error ? err.message : String(err),
-      });
+    if (config.gardners.ingestionEnabled) {
+      try {
+        await gardnersCoverService.syncFullCatalogue();
+      } catch (err) {
+        logger.error('Gardners cover full-catalogue sync failed', {
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
     }
     try {
       await coverService.fetchMissingCovers();
@@ -109,6 +111,17 @@ export function startCron(): void {
   });
 
   logger.info('Failed chunk R2 cleanup scheduled (daily at 04:00)');
+
+  // ── Gardners feed crons ───────────────────────────────────────────────────
+  // Gated behind GARDNERS_INGESTION_ENABLED — pulling the full catalogue
+  // (~2M rows + cover images) will overflow a database not provisioned for
+  // it. Leave this off until running against one that is.
+  if (!config.gardners.ingestionEnabled) {
+    logger.warn(
+      'Gardners ingestion disabled (GARDNERS_INGESTION_ENABLED is not "true") — skipping all Gardners feed crons',
+    );
+    return;
+  }
 
   // ── Gardners Bespoke Inventory poll ──────────────────────────────────────
   // Highest-priority Gardners feed — daily price/stock snapshot from the

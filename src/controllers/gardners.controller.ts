@@ -1,5 +1,6 @@
 import { Request, Response } from 'express';
 import { z } from 'zod';
+import { config } from '../config';
 import { gardnersBootstrapService } from '../services/gardners/bootstrap.service';
 import { logger } from '../lib/logger';
 
@@ -24,6 +25,10 @@ export const gardnersController = {
    * routine use — every feed already runs on its own cron for ongoing
    * updates.
    *
+   * Refuses to run (403) unless GARDNERS_INGESTION_ENABLED=true — same
+   * switch that gates all the Gardners crons, since this endpoint is the
+   * single biggest risk to database size regardless of cron state.
+   *
    * The cover backfill walks the entire catalogue and is the slow part —
    * it defaults to one FTP connection (~1.4s/book measured live, so
    * ~2-4 weeks for a multi-million-title catalogue). Pass coverConcurrency
@@ -31,6 +36,14 @@ export const gardnersController = {
    * ~114ms/book effective, ~2-3 days for the same catalogue).
    */
   async bootstrap(req: Request, res: Response): Promise<void> {
+    if (!config.gardners.ingestionEnabled) {
+      res.status(403).json({
+        error:
+          'Gardners ingestion is disabled (GARDNERS_INGESTION_ENABLED is not "true") — refusing to run the full bootstrap. This is almost certainly running against a database not sized for the full catalogue.',
+      });
+      return;
+    }
+
     const parsed = bootstrapSchema.safeParse(req.body);
     if (!parsed.success) {
       res.status(400).json({ error: parsed.error.flatten().fieldErrors });
