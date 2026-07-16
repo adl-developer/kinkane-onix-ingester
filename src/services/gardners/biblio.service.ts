@@ -5,6 +5,9 @@ import { join } from 'path';
 import { PassThrough } from 'stream';
 import { pipeline } from 'stream/promises';
 import * as unzipper from 'unzipper';
+import { and, desc, eq, isNotNull } from 'drizzle-orm';
+import { db } from '../../db';
+import { gardnersFetchLog } from '../../db/schema';
 import { config } from '../../config';
 import { logger } from '../../lib/logger';
 import { storageService } from '../storage.service';
@@ -136,4 +139,31 @@ async function syncFull(): Promise<string | null> {
   return fetchAndLandInR2(gardnersBiblioFullFeedConfig, file);
 }
 
-export const gardnersBiblioService = { syncDelta, syncFull };
+/**
+ * fetchAndLandInR2 marks the fetch log 'completed' the moment the file
+ * lands in R2 — before a caller has necessarily triggered ingestion for it.
+ * If a process dies in that gap, syncFull() will never re-offer the file
+ * (it's already logged as completed) and the caller has no r2Key to act on,
+ * silently leaving it un-ingested forever. This lets a caller (e.g.
+ * gardners-bootstrap.service.ts) check for and recover from exactly that
+ * gap: the most recently landed full file's R2 key, regardless of whether
+ * this run fetched it or a previous one did.
+ */
+async function getLastLandedFullR2Key(): Promise<string | null> {
+  const [row] = await db
+    .select({ r2Key: gardnersFetchLog.r2Key })
+    .from(gardnersFetchLog)
+    .where(
+      and(
+        eq(gardnersFetchLog.feed, 'biblio_full'),
+        eq(gardnersFetchLog.status, 'completed'),
+        isNotNull(gardnersFetchLog.r2Key),
+      ),
+    )
+    .orderBy(desc(gardnersFetchLog.completedAt))
+    .limit(1);
+
+  return row?.r2Key ?? null;
+}
+
+export const gardnersBiblioService = { syncDelta, syncFull, getLastLandedFullR2Key };

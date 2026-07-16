@@ -29,6 +29,36 @@ async function waitForIngestionJob(jobId: number, pollMs = 15_000): Promise<stri
 }
 
 /**
+ * gardnersBiblioService.syncFull() marks its fetch log 'completed' the
+ * moment the file lands in R2, before ingestion has necessarily been
+ * triggered for it — so a process dying in that exact gap would otherwise
+ * leave the file landed but permanently un-ingested (syncFull() won't
+ * re-offer an already-completed file, and without its r2Key there's
+ * nothing to trigger ingestion for). This resumes correctly from every
+ * point in that sequence:
+ *   - no full file landed yet at all -> lands one now, triggers ingestion
+ *   - landed but never triggered (the crash gap) -> triggers ingestion now
+ *   - already triggered (by this call or an earlier run) -> resumes
+ *     waiting on that existing job instead of erroring
+ */
+async function landAndTriggerBiblioIngestion(): Promise<{ jobId: number; status: string } | null> {
+  const freshlyLanded = await gardnersBiblioService.syncFull();
+  const r2Key = freshlyLanded ?? (await gardnersBiblioService.getLastLandedFullR2Key());
+  if (!r2Key) return null;
+
+  try {
+    const { jobId } = await ingestionService.triggerIngestion(r2Key);
+    return { jobId, status: 'pending' };
+  } catch (err) {
+    const e = err as Error & { statusCode?: number; jobId?: number; status?: string };
+    if (e.statusCode === 409 && e.jobId !== undefined && e.status !== undefined) {
+      return { jobId: e.jobId, status: e.status };
+    }
+    throw err;
+  }
+}
+
+/**
  * One-shot bootstrap for a fresh database: pulls the full Gardners catalogue
  * (ONIX bibliographic data, stock/pricing, promotions, firm-sale flags,
  * ISBN redirects, market restrictions, hourly availability, and cover
@@ -47,20 +77,17 @@ async function waitForIngestionJob(jobId: number, pollMs = 15_000): Promise<stri
 async function runFullBootstrap(options: GardnersBootstrapOptions = {}): Promise<void> {
   logger.info('Gardners bootstrap: starting');
 
-  const r2Key = await gardnersBiblioService.syncFull();
-  if (!r2Key) {
+  const biblio = await landAndTriggerBiblioIngestion();
+  if (!biblio) {
     logger.warn(
-      'Gardners bootstrap: no full Biblio ONIX file found on the server — skipping book ingestion, other feeds will still run',
+      'Gardners bootstrap: no full Biblio ONIX file has ever been landed and none is available now — skipping book ingestion, other feeds will still run',
     );
   } else {
-    const { jobId } = await ingestionService.triggerIngestion(r2Key);
-    logger.info('Gardners bootstrap: biblio ingestion triggered, waiting for it to complete', {
-      jobId,
-      r2Key,
-    });
+    logger.info('Gardners bootstrap: waiting for biblio ingestion to complete', biblio);
 
-    const status = await waitForIngestionJob(jobId);
-    logger.info('Gardners bootstrap: biblio ingestion finished', { jobId, status });
+    const status =
+      biblio.status === 'completed' ? 'completed' : await waitForIngestionJob(biblio.jobId);
+    logger.info('Gardners bootstrap: biblio ingestion finished', { jobId: biblio.jobId, status });
 
     if (status === 'failed') {
       logger.error(
