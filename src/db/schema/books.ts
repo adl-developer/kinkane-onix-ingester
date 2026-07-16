@@ -5,6 +5,7 @@ import {
   text,
   integer,
   numeric,
+  boolean,
   timestamp,
   date,
   customType,
@@ -94,6 +95,16 @@ export const books = pgTable(
     // query requires this to be set (and coverUrl still null) before it will
     // ever try a book — this is what makes Google Books a true last resort.
     gardnersCoverCheckedAt: timestamp('gardners_cover_checked_at', { withTimezone: true }),
+
+    // Set when an ONIX "delete" notification (notificationType '05') arrives
+    // for this recordReference — a title withdrawn from Gardners' catalogue.
+    // chunk.worker.ts sets this instead of deleting the row, since a real
+    // delete cascades to a user's posts/reviews, reading-list entries, and
+    // interaction history for that book in the server DB. Cleared
+    // automatically if a normal notification for the same recordReference
+    // arrives later (e.g. the title is reissued).
+    isRemoved: boolean('is_removed').notNull().default(false),
+    removedAt: timestamp('removed_at', { withTimezone: true }),
 
     createdAt: timestamp('created_at', { withTimezone: true }).defaultNow().notNull(),
     updatedAt: timestamp('updated_at', { withTimezone: true }).defaultNow().notNull(),

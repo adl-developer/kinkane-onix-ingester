@@ -5,7 +5,8 @@
 
 * commit missing Gardners npm dependencies to package.json ([f749ebf](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/f749ebf1b8fe89c4e05acd51f92c50fc7fa812b1))
 * pin embedding output dimension and run backfill in background ([0c9b73b](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/0c9b73b3b1c3a883a2471cf87846bdb71466595f))
-* recover if bootstrap crashes between landing biblio and ingesting it ([64ad826](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/64ad8268164c17ba1ff6d457b265a4e066131166))
+* recover if bootstrap crashes between landing biblio and ingesting it ([8f38834](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/8f38834e9aeccfeef44c06bb98ffd9144d7b0024))
+* soft-delete withdrawn books instead of destroying user content ([e64a30f](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/e64a30f9151c3cf05cf61246c291faf8e6d8bb39))
 * stop concurrent FTP cover downloads from crashing the client ([42a30fa](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/42a30fac09f830cb014a0133a01d5f2331127852))
 * wire up Gardners config, schema barrel, and R2 stream upload ([f7ee536](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/f7ee5363c17d389e46408802519f1bca7e4aca88))
 
