@@ -1,7 +1,7 @@
 import { eq, desc, inArray, and, ne } from 'drizzle-orm';
 import { db } from '../db';
 import { ingestionJobs, ingestionChunks } from '../db/schema';
-import { fileQueue } from '../queue';
+import { fileQueue, chunkQueue } from '../queue';
 import { storageService } from './storage.service';
 
 export const ingestionService = {
@@ -64,6 +64,64 @@ export const ingestionService = {
       .orderBy(desc(ingestionJobs.createdAt))
       .limit(limit)
       .offset(offset);
+  },
+
+  /**
+   * Re-enqueues every not-yet-completed chunk of a job onto THIS process's
+   * queue. Exists for moving a job between environments with separate Redis
+   * instances (e.g. a local run switching to a deployed one) — the BullMQ
+   * queue itself doesn't transfer, but ingestion_chunks (Postgres) and each
+   * chunk's R2 payload (dataKey, only cleared on success) do, since both
+   * live in shared storage. Rebuilds the queue from that durable state
+   * rather than assuming the old queue is reachable.
+   *
+   * Assumes whatever worker was previously processing this job has already
+   * stopped — it does not attempt to detect or avoid a still-active worker
+   * elsewhere, since there's no reliable way to check that from here.
+   */
+  async resumeIncompleteChunks(jobId: number): Promise<{ requeued: number; alreadyCompleted: number }> {
+    const job = await this.getJob(jobId);
+    if (!job) {
+      throw Object.assign(new Error(`Ingestion job ${jobId} not found`), { statusCode: 404 });
+    }
+
+    const incomplete = job.chunks.filter((c) => c.status !== 'completed');
+    const alreadyCompleted = job.chunks.length - incomplete.length;
+
+    for (const chunk of incomplete) {
+      if (!chunk.dataKey) {
+        // Shouldn't happen (dataKey is only nulled on success), but skip
+        // rather than enqueue a job with nothing to process.
+        continue;
+      }
+
+      await db
+        .update(ingestionChunks)
+        .set({ status: 'pending', errorMessage: null, updatedAt: new Date() })
+        .where(eq(ingestionChunks.id, chunk.id));
+
+      const bullJob = await chunkQueue.add(`chunk-${jobId}-${chunk.chunkIndex}`, {
+        ingestionJobId: jobId,
+        chunkId: chunk.id,
+        chunkIndex: chunk.chunkIndex,
+      });
+
+      await db
+        .update(ingestionChunks)
+        .set({ bullJobId: String(bullJob.id) })
+        .where(eq(ingestionChunks.id, chunk.id));
+    }
+
+    // The job-level status may be stuck showing an unrelated earlier error
+    // (e.g. from a since-fixed schema issue) even though chunks have been
+    // completing fine since — 'processing' is accurate again now that work
+    // has been re-enqueued.
+    await db
+      .update(ingestionJobs)
+      .set({ status: 'processing', errorMessage: null, updatedAt: new Date() })
+      .where(eq(ingestionJobs.id, jobId));
+
+    return { requeued: incomplete.length, alreadyCompleted };
   },
 
   async listUnprocessedR2Files(): Promise<string[]> {

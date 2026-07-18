@@ -294,12 +294,18 @@ async function processChunkJob(job: Job<ChunkJobData>): Promise<ChunkJobResult> 
     })
     .where(eq(ingestionJobs.id, ingestionJobId));
 
+  // A job is 'completed' once every chunk has been processed, regardless of
+  // whether some chunks had individual book-level failures within them —
+  // failed_chunks/processed_books remain visible on the row for a human to
+  // review, but don't disqualify the file as a whole. Marking the whole job
+  // 'failed' over a handful of bad records used to make listUnprocessedR2Files
+  // treat an otherwise-finished file as untouched, causing the daily R2 poll
+  // cron to silently re-trigger and fully reprocess it from scratch.
   await db.execute(sql`
     UPDATE ingestion_jobs
     SET
       status = CASE
-        WHEN processed_chunks = total_chunks AND failed_chunks = 0 THEN 'completed'
-        WHEN processed_chunks = total_chunks THEN 'failed'
+        WHEN processed_chunks = total_chunks THEN 'completed'
         ELSE status
       END,
       completed_at = CASE

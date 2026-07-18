@@ -42,6 +42,15 @@ router.get('/jobs/:id', ingestionController.getJob);
 router.get('/unprocessed', ingestionController.listUnprocessed);
 
 /**
+ * POST /ingestion/jobs/:id/resume
+ * Re-enqueues every not-yet-completed chunk of a job onto this process's
+ * queue, rebuilt from Postgres/R2 state. Use when moving a job between
+ * environments with separate Redis instances — make sure whatever was
+ * previously processing it has actually stopped first.
+ */
+router.post('/jobs/:id/resume', ingestionController.resumeJob);
+
+/**
  * POST /ingestion/backfill-embeddings
  * Generates and writes embeddings for all books where embedding IS NULL.
  * Long-running — returns { processed, failed, total } when complete.
