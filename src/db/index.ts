@@ -7,7 +7,7 @@ const client = postgres(config.database.url, {
   max: 10,
   idle_timeout: 30,
   connect_timeout: 10,
-  ssl: config.nodeEnv === 'production' ? 'require' : false,
+  ssl: config.database.url.includes('sslmode=require') ? 'require' : false,
 });
 
 export const db = drizzle(client, { schema });
