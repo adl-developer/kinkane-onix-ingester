@@ -4,7 +4,7 @@
 ### Bug Fixes
 
 * commit missing Gardners npm dependencies to package.json ([f749ebf](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/f749ebf1b8fe89c4e05acd51f92c50fc7fa812b1))
-* detect SSL requirement from the connection string, not NODE_ENV ([4c04690](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/4c046904d4326809d1949411038dea3ce1d180cb))
+* detect SSL requirement from the connection string, not NODE_ENV ([06d4881](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/06d4881cdf1220255e7d61fe91c1157aa560e85a))
 * pin embedding output dimension and run backfill in background ([0c9b73b](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/0c9b73b3b1c3a883a2471cf87846bdb71466595f))
 * recover if bootstrap crashes between landing biblio and ingesting it ([8f38834](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/8f38834e9aeccfeef44c06bb98ffd9144d7b0024))
 * soft-delete withdrawn books instead of destroying user content ([19ec77f](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/19ec77fd03d97c691e41c46b7417a1be201251a9))
@@ -29,3 +29,8 @@
 * make Google Books cover fallback a true last resort ([b355637](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/b355637bb381f5bffc47790ab26a39e57c10511b))
 * move chunk payloads from PostgreSQL JSONB to R2 object storage ([bcf2404](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/bcf240446d3f6b12fd6d8615110ca147a168afb0))
 * run the cover backfill over multiple concurrent FTP connections ([d179c9f](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/d179c9f2d1365c48125eb7a075c7cafa3a6158f6))
+
+
+### Reverts
+
+* put admin token expiry back to 30m ([c75c1ce](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/c75c1ced46927ac3419b07b6ba63408ee3412f54))
