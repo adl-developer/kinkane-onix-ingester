@@ -22,6 +22,6 @@ export const authController = {
     }
 
     const token = authService.generateAdminToken();
-    res.status(200).json({ token, expiresIn: '30m' });
+    res.status(200).json({ token, expiresIn: '72h' });
   },
 };

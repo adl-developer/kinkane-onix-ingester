@@ -8,7 +8,7 @@
 * recover if bootstrap crashes between landing biblio and ingesting it ([8f38834](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/8f38834e9aeccfeef44c06bb98ffd9144d7b0024))
 * soft-delete withdrawn books instead of destroying user content ([19ec77f](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/19ec77fd03d97c691e41c46b7417a1be201251a9))
 * stop concurrent FTP cover downloads from crashing the client ([42a30fa](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/42a30fac09f830cb014a0133a01d5f2331127852))
-* stop duplicate re-ingestion of already-processed ONIX files ([9dfee2f](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/9dfee2f035b9c865012405a92fb002bcbca0512f))
+* stop duplicate re-ingestion of already-processed ONIX files ([a1a1686](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/a1a16869bcad7b30eb2307395f72e21861db106b))
 * wire up Gardners config, schema barrel, and R2 stream upload ([f7ee536](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/f7ee5363c17d389e46408802519f1bca7e4aca88))
 
 
@@ -24,6 +24,7 @@
 * add POST /api/ingestion/backfill-embeddings admin endpoint ([1f1b831](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/1f1b8311e048461827fe4a4891c59e0556910f47))
 * add Promotions, isbn-slips, Firm Sale, and mkres feeds (Step 5) ([fe9496f](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/fe9496f0c61520dd1977ecd3de29adb022022d3d))
 * backfill bookId on gardners_stock rows after each chunk upsert ([50f7d4b](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/50f7d4be765ac24789d3311cc5247f3ebc0f4e9d))
+* extend admin token expiry from 30m to 72h ([0f0f391](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/0f0f39129b591d027fa0fd5cb23a679cf587172c))
 * make Google Books cover fallback a true last resort ([b355637](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/b355637bb381f5bffc47790ab26a39e57c10511b))
 * move chunk payloads from PostgreSQL JSONB to R2 object storage ([bcf2404](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/bcf240446d3f6b12fd6d8615110ca147a168afb0))
 * run the cover backfill over multiple concurrent FTP connections ([d179c9f](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/d179c9f2d1365c48125eb7a075c7cafa3a6158f6))
