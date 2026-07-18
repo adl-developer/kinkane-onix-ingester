@@ -1,4 +1,4 @@
-# 1.0.0 (2026-07-16)
+# 1.0.0 (2026-07-18)
 
 
 ### Bug Fixes
@@ -8,6 +8,7 @@
 * recover if bootstrap crashes between landing biblio and ingesting it ([8f38834](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/8f38834e9aeccfeef44c06bb98ffd9144d7b0024))
 * soft-delete withdrawn books instead of destroying user content ([19ec77f](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/19ec77fd03d97c691e41c46b7417a1be201251a9))
 * stop concurrent FTP cover downloads from crashing the client ([42a30fa](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/42a30fac09f830cb014a0133a01d5f2331127852))
+* stop duplicate re-ingestion of already-processed ONIX files ([9dfee2f](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/9dfee2f035b9c865012405a92fb002bcbca0512f))
 * wire up Gardners config, schema barrel, and R2 stream upload ([f7ee536](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/f7ee5363c17d389e46408802519f1bca7e4aca88))
 
 
@@ -18,7 +19,7 @@
 * add Bespoke Inventory feed ingestion (CSV chunk-queue pattern) ([8fbea65](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/8fbea655bdb24cc163513a05200cb0298ce52b5a))
 * add DB schema and SFTP/FTP fetcher framework for Gardners feeds ([3356d09](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/3356d090a9c1fac2bb5a77a61d5ab05c68b8368d))
 * add Gardners cover image sync (Step 7, final feed) ([5cf76d4](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/5cf76d4511f132da9ea74e9cf78bbd7fe22d2d29))
-* add GARDNERS_INGESTION_ENABLED master switch for all Gardners work ([41cedc9](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/41cedc98f611be8e54e9382a0ed9db7395e518a1))
+* add GARDNERS_INGESTION_ENABLED master switch for all Gardners work ([4da2a0e](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/4da2a0e6e2f65f9180b2c32390309c8710041af0))
 * add ONIX Biblio feed ingestion + fix SFTP throughput and retry bugs ([5ebb1f8](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/5ebb1f8d4f31d9d9ac08f6cc454ceecc5df17621))
 * add POST /api/ingestion/backfill-embeddings admin endpoint ([1f1b831](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/1f1b8311e048461827fe4a4891c59e0556910f47))
 * add Promotions, isbn-slips, Firm Sale, and mkres feeds (Step 5) ([fe9496f](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/fe9496f0c61520dd1977ecd3de29adb022022d3d))

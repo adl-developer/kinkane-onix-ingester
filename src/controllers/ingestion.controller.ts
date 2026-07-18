@@ -170,6 +170,31 @@ export const ingestionController = {
   },
 
   /**
+   * POST /ingestion/jobs/:id/resume
+   * Re-enqueues every not-yet-completed chunk of a job onto this process's
+   * own queue, rebuilt from Postgres/R2 state rather than assuming the
+   * original queue is reachable. For moving a job to an environment with a
+   * different Redis instance (a different deploy, a different machine) —
+   * make sure whatever was previously processing this job has actually
+   * stopped first, since this doesn't detect or coordinate with it.
+   */
+  async resumeJob(req: Request, res: Response): Promise<void> {
+    const jobId = parseInt(req.params.id, 10);
+    if (isNaN(jobId)) {
+      res.status(400).json({ error: 'Invalid job ID' });
+      return;
+    }
+
+    try {
+      const result = await ingestionService.resumeIncompleteChunks(jobId);
+      res.status(200).json(result);
+    } catch (err: unknown) {
+      const e = err as Error & { statusCode?: number };
+      res.status(e.statusCode ?? 500).json({ error: e.message });
+    }
+  },
+
+  /**
    * POST /ingestion/backfill-embeddings
    * Fetches all books with embedding IS NULL, generates embeddings in batches,
    * and writes them back. Responds immediately with 202; the work runs in the
