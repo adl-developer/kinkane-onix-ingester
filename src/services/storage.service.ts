@@ -8,6 +8,7 @@ import {
 } from '@aws-sdk/client-s3';
 import { Upload } from '@aws-sdk/lib-storage';
 import { getSignedUrl } from '@aws-sdk/s3-request-presigner';
+import { NodeHttpHandler } from '@smithy/node-http-handler';
 import { Readable } from 'stream';
 import { config } from '../config';
 
@@ -23,6 +24,17 @@ class StorageService {
         accessKeyId: config.r2.accessKeyId,
         secretAccessKey: config.r2.secretAccessKey,
       },
+      // Without an explicit timeout, a request whose connection or response
+      // hangs (dropped TCP session with no reset, R2 stalling mid-response)
+      // blocks the awaiting call forever — same hang class as the Gemini
+      // embedding client, but earlier in the same chunk-worker code path.
+      // socketTimeout also bounds a body stream that starts but then goes
+      // idle mid-transfer, which requestTimeout alone does not catch.
+      requestHandler: new NodeHttpHandler({
+        connectionTimeout: 10_000,
+        requestTimeout: 60_000,
+        socketTimeout: 60_000,
+      }),
     });
     this.bucket = config.r2.bucketName;
   }

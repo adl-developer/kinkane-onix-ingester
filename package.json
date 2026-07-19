@@ -17,6 +17,7 @@
     "@bull-board/api": "^5.23.0",
     "@bull-board/express": "^5.23.0",
     "@google/generative-ai": "^0.21.0",
+    "@smithy/node-http-handler": "^4.9.7",
     "basic-ftp": "^6.0.1",
     "bullmq": "^5.26.0",
     "csv-parse": "^7.0.1",
