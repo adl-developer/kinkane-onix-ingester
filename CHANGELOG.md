@@ -5,7 +5,7 @@
 
 * apply the same job-status fix to the chunk failure handler too ([b6241e3](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/b6241e3ed7b21a45cb9e75eec0ecc70abb68789e))
 * bound Gemini embedding calls with a timeout to stop hung workers ([9d3c6db](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/9d3c6db8dd795af6b9a40f738a0f79156487f122))
-* bound R2/S3 client calls with connection, request, and socket timeouts ([ea98c81](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/ea98c81748f97403bea348155816a04023b53ae1))
+* bound R2/S3 client calls with connection, request, and socket timeouts ([7150454](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/71504545e36d114383e48bbd87b38765dabe99a5))
 * commit missing Gardners npm dependencies to package.json ([f749ebf](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/f749ebf1b8fe89c4e05acd51f92c50fc7fa812b1))
 * detect SSL requirement from the connection string, not NODE_ENV ([06d4881](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/06d4881cdf1220255e7d61fe91c1157aa560e85a))
 * pin embedding output dimension and run backfill in background ([0c9b73b](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/0c9b73b3b1c3a883a2471cf87846bdb71466595f))
@@ -34,6 +34,11 @@
 * make Google Books cover fallback a true last resort ([b355637](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/b355637bb381f5bffc47790ab26a39e57c10511b))
 * move chunk payloads from PostgreSQL JSONB to R2 object storage ([bcf2404](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/bcf240446d3f6b12fd6d8615110ca147a168afb0))
 * run the cover backfill over multiple concurrent FTP connections ([d179c9f](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/d179c9f2d1365c48125eb7a075c7cafa3a6158f6))
+
+
+### Performance Improvements
+
+* batch per-book DB writes in chunk worker instead of one row at a time ([e02fb65](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/e02fb653d8bda36b2d92f599662338c554562544))
 
 
 ### Reverts
