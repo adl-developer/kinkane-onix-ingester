@@ -3,7 +3,8 @@
 
 ### Bug Fixes
 
-* bound Gemini embedding calls with a timeout to stop hung workers ([cb58281](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/cb58281f6b3de940d092443b4d03c125d0888b20))
+* apply the same job-status fix to the chunk failure handler too ([10273b9](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/10273b9a8b95cf531c0e2063a276c505d31a646a))
+* bound Gemini embedding calls with a timeout to stop hung workers ([9d3c6db](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/9d3c6db8dd795af6b9a40f738a0f79156487f122))
 * commit missing Gardners npm dependencies to package.json ([f749ebf](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/f749ebf1b8fe89c4e05acd51f92c50fc7fa812b1))
 * detect SSL requirement from the connection string, not NODE_ENV ([06d4881](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/06d4881cdf1220255e7d61fe91c1157aa560e85a))
 * pin embedding output dimension and run backfill in background ([0c9b73b](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/0c9b73b3b1c3a883a2471cf87846bdb71466595f))
