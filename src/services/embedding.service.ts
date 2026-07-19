@@ -37,9 +37,19 @@ class EmbeddingService {
    * Batches requests to stay within API limits and handles retries.
    */
   async generateBatch(texts: string[]): Promise<number[][]> {
-    const model = this.genai.getGenerativeModel({
-      model: config.gemini.embeddingModel,
-    });
+    // Without an explicit timeout, a request that hangs rather than errors
+    // (a dropped connection with no TCP reset, a stalled response, etc.)
+    // blocks this call forever — withRetry only catches rejections, so a
+    // genuine hang never reaches it. That permanently occupies whichever
+    // chunk-worker concurrency slot is awaiting it; observed live as chunk
+    // throughput dropping to zero across every job while enough concurrent
+    // workers ended up stuck this way. 60s is generous for a real batch
+    // response but still bounds the wait so a hang becomes a normal,
+    // retryable failure instead.
+    const model = this.genai.getGenerativeModel(
+      { model: config.gemini.embeddingModel },
+      { timeout: 60_000 },
+    );
 
     const results: number[][] = new Array(texts.length);
     const batchSize = config.ingestion.embeddingBatchSize;
