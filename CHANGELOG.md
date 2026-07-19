@@ -1,4 +1,4 @@
-# 1.0.0 (2026-07-18)
+# 1.0.0 (2026-07-19)
 
 
 ### Bug Fixes
@@ -6,6 +6,7 @@
 * commit missing Gardners npm dependencies to package.json ([f749ebf](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/f749ebf1b8fe89c4e05acd51f92c50fc7fa812b1))
 * detect SSL requirement from the connection string, not NODE_ENV ([06d4881](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/06d4881cdf1220255e7d61fe91c1157aa560e85a))
 * pin embedding output dimension and run backfill in background ([0c9b73b](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/0c9b73b3b1c3a883a2471cf87846bdb71466595f))
+* raise DB connection pool size to cover real worker concurrency ([0ea30c0](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/0ea30c039ced91a85838d18fac506eaf6a1914c5))
 * recover if bootstrap crashes between landing biblio and ingesting it ([8f38834](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/8f38834e9aeccfeef44c06bb98ffd9144d7b0024))
 * soft-delete withdrawn books instead of destroying user content ([19ec77f](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/19ec77fd03d97c691e41c46b7417a1be201251a9))
 * stop concurrent FTP cover downloads from crashing the client ([42a30fa](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/42a30fac09f830cb014a0133a01d5f2331127852))
@@ -33,4 +34,4 @@
 
 ### Reverts
 
-* put admin token expiry back to 30m ([c75c1ce](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/c75c1ced46927ac3419b07b6ba63408ee3412f54))
+* put admin token expiry back to 30m ([43c13db](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/43c13dba86616857477dce560ee5b465ce809a7e))
