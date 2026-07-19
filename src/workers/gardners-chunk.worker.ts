@@ -109,8 +109,20 @@ async function processGardnersChunkJob(
 
   const { processed, failed } = await upsertChunk(feed, chunkKey);
 
-  // Only delete the R2 payload on full success — on failure it's preserved
-  // for debugging, matching chunk.worker.ts's ONIX equivalent.
+  const { isComplete, syncedAt } = await gardnersFetcher.incrementProcessedChunks(logId);
+  if (isComplete) {
+    await sweepIfFullReplaceFeed(feed, syncedAt);
+  }
+
+  // Only delete the R2 payload on full success, and only after the chunk's
+  // completion is durably recorded above. Deleting first meant a DB failure
+  // afterward (e.g. a connection-pool timeout acquiring a connection, before
+  // the query ever reached the database — safe to retry from scratch) left
+  // an unretryable job: BullMQ would retry it, but the payload it needs to
+  // re-upsert from was already gone, failing identically ("specified key
+  // does not exist") on every subsequent attempt until retries ran out. On
+  // failure the payload is preserved for debugging, matching
+  // chunk.worker.ts's ONIX equivalent.
   if (failed === 0) {
     try {
       await storageService.deleteObject(chunkKey);
@@ -121,11 +133,6 @@ async function processGardnersChunkJob(
         error: err instanceof Error ? err.message : String(err),
       });
     }
-  }
-
-  const { isComplete, syncedAt } = await gardnersFetcher.incrementProcessedChunks(logId);
-  if (isComplete) {
-    await sweepIfFullReplaceFeed(feed, syncedAt);
   }
 
   return { processedRows: processed, failedRows: failed };

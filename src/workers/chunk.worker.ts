@@ -177,9 +177,19 @@ async function processChunkJob(job: Job<ChunkJobData>): Promise<ChunkJobResult> 
 
   // Fetch the R2 key for this chunk's payload
   const [chunkRow] = await db
-    .select({ dataKey: ingestionChunks.dataKey })
+    .select({ dataKey: ingestionChunks.dataKey, status: ingestionChunks.status, processedBooks: ingestionChunks.processedBooks })
     .from(ingestionChunks)
     .where(eq(ingestionChunks.id, chunkId));
+
+  // A stale retry of a chunk that already fully completed on an earlier
+  // attempt (e.g. BullMQ retrying after the job-level counter update timed
+  // out, even though this chunk's own work already committed) — re-running
+  // the upserts is harmless, but re-running processedChunks/processedBooks
+  // + 1 below is not: it has no per-chunk guard, so it would double-count.
+  // Bail out before doing (or counting) any work again.
+  if (chunkRow?.status === 'completed') {
+    return { processedBooks: chunkRow.processedBooks ?? 0, failedBooks: 0 };
+  }
 
   if (!chunkRow?.dataKey) {
     throw new Error(`No R2 data key found for chunk ${chunkId} — it may have already been processed`);
@@ -257,29 +267,16 @@ async function processChunkJob(job: Job<ChunkJobData>): Promise<ChunkJobResult> 
 
   const chunkStatus = failedBooks === onixBooks.length ? 'failed' : 'completed';
 
-  // 3. On success, delete the R2 payload file — it's no longer needed and
-  //    would otherwise accumulate indefinitely. On failure, preserve it so
-  //    operators can inspect the raw data that caused the failure.
-  if (chunkStatus === 'completed') {
-    try {
-      await storageService.deleteObject(chunkRow.dataKey);
-    } catch (err) {
-      logger.warn('Failed to delete chunk R2 file after successful processing', {
-        worker: 'chunk',
-        chunkId,
-        dataKey: chunkRow.dataKey,
-        error: err instanceof Error ? err.message : String(err),
-      });
-    }
-  }
-
+  // Durably record the chunk's outcome — including the processedChunks/
+  // processedBooks counters, which have no per-chunk idempotency guard of
+  // their own — before touching R2. dataKey is deliberately left as-is
+  // here (still pointing at the real object) rather than nulled yet; see
+  // below.
   await db
     .update(ingestionChunks)
     .set({
       status: chunkStatus,
       processedBooks,
-      // Null out the key on success so it's clear the file no longer exists in R2
-      dataKey: chunkStatus === 'completed' ? null : chunkRow.dataKey,
       updatedAt: new Date(),
     })
     .where(eq(ingestionChunks.id, chunkId));
@@ -315,6 +312,34 @@ async function processChunkJob(job: Job<ChunkJobData>): Promise<ChunkJobResult> 
       updated_at = NOW()
     WHERE id = ${ingestionJobId}
   `);
+
+  // Only delete the R2 payload once the chunk's completion is durably
+  // recorded above, and only clear dataKey once the delete itself succeeds.
+  // Deleting first (the previous order) meant a DB failure afterward — e.g.
+  // a connection-pool timeout waiting for a free connection, before the
+  // query ever reached the database — left an unretryable chunk: a retry
+  // would still see the old (non-null) dataKey, try to re-fetch the
+  // now-deleted R2 object, and fail identically ("specified key does not
+  // exist") on every subsequent attempt. The early-return above for
+  // already-'completed' chunks is what makes retrying safe now — a retry
+  // that lands here again re-upserts (idempotent) but never re-counts.
+  // On failure, the payload is preserved for debugging.
+  if (chunkStatus === 'completed') {
+    try {
+      await storageService.deleteObject(chunkRow.dataKey);
+      await db
+        .update(ingestionChunks)
+        .set({ dataKey: null })
+        .where(eq(ingestionChunks.id, chunkId));
+    } catch (err) {
+      logger.warn('Failed to delete chunk R2 file after successful processing', {
+        worker: 'chunk',
+        chunkId,
+        dataKey: chunkRow.dataKey,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
 
   return { processedBooks, failedBooks };
 }
