@@ -389,13 +389,16 @@ export function startChunkWorker(concurrency = 5): Worker<ChunkJobData, ChunkJob
         })
         .where(eq(ingestionJobs.id, ingestionJobId));
 
-      // Resolve job status if this was the last chunk
+      // Resolve job status if this was the last chunk — same rule as the
+      // success path: 'completed' once every chunk has been accounted for,
+      // regardless of how many failed. See that path's comment for why
+      // (marking the whole job 'failed' here caused the exact same silent
+      // full-file re-triggering bug this fix was for).
       await db.execute(sql`
         UPDATE ingestion_jobs
         SET
           status = CASE
-            WHEN processed_chunks = total_chunks AND failed_chunks = 0 THEN 'completed'
-            WHEN processed_chunks = total_chunks THEN 'failed'
+            WHEN processed_chunks = total_chunks THEN 'completed'
             ELSE status
           END,
           completed_at = CASE
