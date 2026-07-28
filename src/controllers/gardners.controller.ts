@@ -17,23 +17,23 @@ const bootstrapSchema = z.object({
 export const gardnersController = {
   /**
    * POST /gardners/bootstrap
-   * Body (optional): { coverBatchSize?: number, coverConcurrency?: number }
+   * Body: none. (The old coverBatchSize/coverConcurrency fields are accepted
+   * but ignored — see below.)
    *
-   * One-shot fresh-database bootstrap: pulls the full Gardners catalogue
-   * (ONIX bibliographic data + images) and every other feed. Responds 202
-   * immediately; progress is logged. Intended for an initial load, not
-   * routine use — every feed already runs on its own cron for ongoing
-   * updates.
+   * Loads the full ~1.98M-record Gardners catalogue from GARDBIB plus every
+   * CSV feed. Responds 202 immediately; runs in the background and is
+   * expected to finish well inside an hour. Books that already have a row
+   * are skipped, so re-running is cheap and safe.
    *
    * Refuses to run (403) unless GARDNERS_INGESTION_ENABLED=true — same
    * switch that gates all the Gardners crons, since this endpoint is the
    * single biggest risk to database size regardless of cron state.
    *
-   * The cover backfill walks the entire catalogue and is the slow part —
-   * it defaults to one FTP connection (~1.4s/book measured live, so
-   * ~2-4 weeks for a multi-million-title catalogue). Pass coverConcurrency
-   * to run several connections in parallel instead (20 is live-verified:
-   * ~114ms/book effective, ~2-3 days for the same catalogue).
+   * Two things this endpoint intentionally does not do, because either turns
+   * a sub-hour run into a multi-day one:
+   *   - embeddings (new books land with embedded_at NULL for the existing
+   *     backfill to pick up)
+   *   - cover images (daily cron, or POST /gardners/covers/backfill)
    */
   async bootstrap(req: Request, res: Response): Promise<void> {
     if (!config.gardners.ingestionEnabled) {
@@ -52,7 +52,7 @@ export const gardnersController = {
 
     res.status(202).json({
       message:
-        'Gardners full bootstrap started — this pulls the entire catalogue and can take a long time (the cover backfill in particular may take days-to-weeks depending on coverConcurrency). Follow progress in the logs and via GET /ingestion/jobs for the biblio ingestion job.',
+        'Gardners full bootstrap started — loads the entire ~1.98M-record catalogue from GARDBIB, skipping books that already exist, plus every CSV feed. Follow progress in the logs and via GET /ingestion/jobs (file_key "gardners/GARDBIB.zip"). Embeddings and cover images are handled by their own backfills, not by this endpoint.',
     });
 
     gardnersBootstrapService.runFullBootstrap(parsed.data).catch((err: unknown) => {
