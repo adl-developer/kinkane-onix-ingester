@@ -15,17 +15,28 @@ interface JellybooksExcerpt {
 }
 
 interface JellybooksResponse {
-  response_header: { status: string; [key: string]: unknown };
+  response_header: {
+    status?: string;
+    page?: number;
+    per_page?: number;
+    count?: number;
+    total_count?: number;
+    [key: string]: unknown;
+  };
   excerpts: JellybooksExcerpt[];
 }
 
-const FETCH_TIMEOUT_MS = 20_000;
+// The delta feed only returns recent changes and responds quickly. The full
+// catalogue snapshot can take well over a minute to generate server-side
+// (measured ~91s / 78MB) — it needs a much longer budget.
+const DELTA_FETCH_TIMEOUT_MS = 20_000;
+const FULL_FETCH_TIMEOUT_MS = 3 * 60_000;
 const MAX_FETCH_ATTEMPTS = 3;
 const UPSERT_BATCH_SIZE = 500;
 
-async function fetchWithTimeout(url: URL, headers: Record<string, string>): Promise<Response> {
+async function fetchWithTimeout(url: URL, headers: Record<string, string>, timeoutMs: number): Promise<Response> {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(url, { headers, signal: controller.signal });
   } finally {
@@ -33,7 +44,11 @@ async function fetchWithTimeout(url: URL, headers: Record<string, string>): Prom
   }
 }
 
-async function callJellybooks(path: string, params: Record<string, string>): Promise<JellybooksExcerpt[]> {
+async function fetchJellybooksPage(
+  path: string,
+  params: Record<string, string>,
+  timeoutMs: number,
+): Promise<JellybooksResponse> {
   const apiKey = config.jellybooks.apiKey;
   if (!apiKey) {
     throw new Error('JELLYBOOKS_API_KEY not set');
@@ -49,7 +64,7 @@ async function callJellybooks(path: string, params: Record<string, string>): Pro
   let lastError: unknown;
   for (let attempt = 1; attempt <= MAX_FETCH_ATTEMPTS; attempt++) {
     try {
-      const response = await fetchWithTimeout(url, headers);
+      const response = await fetchWithTimeout(url, headers, timeoutMs);
 
       if (!response.ok) {
         // 5xx is worth retrying (transient); 4xx (bad key, bad params) is not.
@@ -59,8 +74,7 @@ async function callJellybooks(path: string, params: Record<string, string>): Pro
         throw Object.assign(new Error(`Jellybooks API responded with ${response.status}`), { retryable: true });
       }
 
-      const data = (await response.json()) as JellybooksResponse;
-      return data.excerpts ?? [];
+      return (await response.json()) as JellybooksResponse;
     } catch (err) {
       lastError = err;
       const retryable = err instanceof Error && (err as Error & { retryable?: boolean }).retryable;
@@ -83,6 +97,51 @@ async function callJellybooks(path: string, params: Record<string, string>): Pro
   throw lastError;
 }
 
+/**
+ * Fetches every page of a Jellybooks feed.
+ *
+ * Jellybooks currently serves the whole catalogue in one page (per_page is
+ * effectively unbounded, so count === total_count on page 1) — but that's a
+ * server-side default, not a guarantee. Trusting it silently drops excerpts
+ * the day the catalogue outgrows it, with no error to notice, so page until
+ * we've actually accounted for total_count.
+ */
+async function callJellybooks(
+  path: string,
+  params: Record<string, string>,
+  timeoutMs: number,
+): Promise<JellybooksExcerpt[]> {
+  const all: JellybooksExcerpt[] = [];
+  let page = 1;
+
+  for (;;) {
+    const data = await fetchJellybooksPage(path, { ...params, page: String(page) }, timeoutMs);
+    const batch = data.excerpts ?? [];
+
+    // push(...batch) would blow the call stack on a 379k-entry page.
+    for (const excerpt of batch) all.push(excerpt);
+
+    const totalCount = data.response_header?.total_count;
+
+    // No total to verify against, an empty page, or we have everything —
+    // the empty-page check is what stops us if total_count is ever wrong.
+    if (typeof totalCount !== 'number' || batch.length === 0 || all.length >= totalCount) {
+      if (typeof totalCount === 'number' && all.length < totalCount) {
+        logger.warn('Jellybooks feed returned fewer excerpts than total_count', {
+          path,
+          received: all.length,
+          totalCount,
+          pages: page,
+        });
+      }
+      return all;
+    }
+
+    page++;
+    logger.info('Jellybooks feed paginating', { path, nextPage: page, received: all.length, totalCount });
+  }
+}
+
 function chunk<T>(arr: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < arr.length; i += size) out.push(arr.slice(i, i + size));
@@ -94,20 +153,34 @@ async function upsertExcerpts(excerpts: JellybooksExcerpt[]): Promise<{ upserted
     return { upserted: 0, withdrawn: 0, skipped: 0 };
   }
 
+  // The full-catalogue feed contains duplicate isbn13 entries (e.g. re-listed
+  // across records). Dedupe up front, keeping the last occurrence — otherwise
+  // a single upsert batch can end up with the same conflict key twice, which
+  // Postgres rejects ("ON CONFLICT DO UPDATE command cannot affect row a
+  // second time").
+  const deduped = [...new Map(excerpts.map((e) => [e.isbn13, e])).values()];
+
   // Only check ownership for the ISBNs in this batch — loading the entire
   // books table on every sync (including small incremental deltas) doesn't scale.
-  const batchIsbns = [...new Set(excerpts.map((e) => e.isbn13))];
-  const ownRows = await db
-    .select({ isbn13: books.isbn13 })
-    .from(books)
-    .where(inArray(books.isbn13, batchIsbns));
-  const ownIsbns = new Set(ownRows.map((r) => r.isbn13!));
+  // Chunked because a single inArray() over the full-catalogue feed's ISBN list
+  // (hundreds of thousands of params) blows postgres.js's query-fragment merge stack.
+  const batchIsbns = deduped.map((e) => e.isbn13);
+  const ownIsbns = new Set<string>();
+  for (const isbnChunk of chunk(batchIsbns, UPSERT_BATCH_SIZE)) {
+    const ownRows = await db
+      .select({ isbn13: books.isbn13 })
+      .from(books)
+      .where(inArray(books.isbn13, isbnChunk));
+    for (const row of ownRows) {
+      if (row.isbn13) ownIsbns.add(row.isbn13);
+    }
+  }
 
   let upserted = 0;
   let withdrawn = 0;
   let skipped = 0;
 
-  const owned = excerpts.filter((e) => {
+  const owned = deduped.filter((e) => {
     if (!ownIsbns.has(e.isbn13)) {
       skipped++;
       return false;
@@ -156,7 +229,7 @@ export const excerptService = {
   async backfillExcerpts(): Promise<void> {
     logger.info('Excerpt backfill: starting full feed fetch');
 
-    const excerpts = await callJellybooks('/discovery/api/excerpts', {});
+    const excerpts = await callJellybooks('/discovery/api/excerpts', {}, FULL_FETCH_TIMEOUT_MS);
 
     if (excerpts.length === 0) {
       logger.info('Excerpt backfill: no excerpts returned');
@@ -190,9 +263,11 @@ export const excerptService = {
 
     logger.info('Excerpt sync: fetching delta feed', { updatedSince: updatedSince.toISOString() });
 
-    const excerpts = await callJellybooks('/discovery/api/excerpt_updates', {
-      updated_since: updatedSince.toISOString(),
-    });
+    const excerpts = await callJellybooks(
+      '/discovery/api/excerpt_updates',
+      { updated_since: updatedSince.toISOString() },
+      DELTA_FETCH_TIMEOUT_MS,
+    );
 
     if (excerpts.length === 0) {
       logger.info('Excerpt sync: no updates');

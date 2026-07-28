@@ -226,6 +226,21 @@ export const ingestionController = {
   },
 
   /**
+   * POST /ingestion/sync-excerpts
+   * Manually runs the incremental Jellybooks delta sync, same as the
+   * excerptSyncSchedule cron. Falls back to a full backfill automatically
+   * if book_excerpts is still empty. Responds 202; runs in the background.
+   */
+  async syncExcerpts(_req: Request, res: Response): Promise<void> {
+    res.status(202).json({ message: 'Excerpt sync started' });
+
+    excerptService.syncExcerpts().catch((err: unknown) => {
+      const e = err as Error;
+      logger.error('Excerpt sync failed', { error: e.message });
+    });
+  },
+
+  /**
    * POST /ingestion/presign
    * Returns a presigned PUT URL so the caller can upload a large ONIX file
    * directly to R2 without routing the bytes through this server.

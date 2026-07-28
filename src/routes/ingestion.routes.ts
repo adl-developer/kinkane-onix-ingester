@@ -64,4 +64,13 @@ router.post('/backfill-embeddings', ingestionController.backfillEmbeddings);
  */
 router.post('/backfill-excerpts', ingestionController.backfillExcerpts);
 
+/**
+ * POST /ingestion/sync-excerpts
+ * Manually runs the incremental Jellybooks delta sync (same as the
+ * excerptSyncSchedule cron). Falls back to a full backfill automatically
+ * if book_excerpts is still empty. Responds 202 immediately; the sync runs
+ * in the background and results are logged on completion.
+ */
+router.post('/sync-excerpts', ingestionController.syncExcerpts);
+
 export default router;
