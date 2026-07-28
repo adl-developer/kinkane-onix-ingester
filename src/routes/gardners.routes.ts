@@ -17,4 +17,14 @@ router.use(requireAdminToken);
  */
 router.post('/bootstrap', gardnersController.bootstrap);
 
+/**
+ * POST /gardners/covers/backfill
+ * Body: { batchSize?: number, concurrency?: number }
+ * Runs the concurrent Gardners cover backfill (covers.gardners.com) against
+ * whatever books already exist — unlike /bootstrap, does not touch ONIX
+ * ingestion or any other feed. Responds 202 immediately; runs in the
+ * background.
+ */
+router.post('/covers/backfill', gardnersController.coversBackfill);
+
 export default router;
