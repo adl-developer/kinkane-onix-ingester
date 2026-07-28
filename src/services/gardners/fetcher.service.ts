@@ -1,4 +1,5 @@
 import { Readable } from 'stream';
+import { stat, unlink } from 'fs/promises';
 import { and, eq, gt, inArray, ne, or, sql } from 'drizzle-orm';
 import { db } from '../../db';
 import { gardnersFetchLog, gardnersFeedEnum } from '../../db/schema';
@@ -170,6 +171,16 @@ async function openStreamForFile(
   return stream;
 }
 
+// fastGet's 64 concurrent range requests (and basic-ftp's downloadTo) have
+// been observed live to silently hand back a truncated/corrupt local file
+// with no rejected promise to catch it — surfacing several steps downstream
+// as an opaque decompression error (unzipper's "too many length or distance
+// symbols") that doesn't self-explain the actual cause. Verifying the byte
+// count against the listing catches it at the source and gives a couple of
+// retries before giving up, since a corrupt transfer isn't necessarily
+// reproducible.
+const DOWNLOAD_SIZE_CHECK_MAX_ATTEMPTS = 3;
+
 /**
  * Downloads a remote file to a local path using the protocol's
  * concurrent/optimized transfer method (SFTP's fastGet, 64 requests in
@@ -182,13 +193,39 @@ async function openStreamForFile(
  * should read the resulting local file (e.g. via fs.createReadStream) for
  * any further streaming (unzip, CSV parsing, upload) rather than reverting
  * to openStreamForFile/readStream for large feeds.
+ *
+ * Verifies the downloaded file's size against the listing's reported size
+ * (when known) and retries the whole transfer on mismatch, up to
+ * DOWNLOAD_SIZE_CHECK_MAX_ATTEMPTS times, before throwing.
  */
 async function downloadToLocalFile(
   connection: GardnersConnectionName,
   file: RemoteFileDescriptor,
   localPath: string,
 ): Promise<void> {
-  await withConnection(connection, (client) => client.downloadToFile(file.path, localPath));
+  for (let attempt = 1; attempt <= DOWNLOAD_SIZE_CHECK_MAX_ATTEMPTS; attempt++) {
+    await withConnection(connection, (client) => client.downloadToFile(file.path, localPath));
+
+    if (file.size <= 0) return; // nothing to verify against
+
+    const { size: downloadedSize } = await stat(localPath);
+    if (downloadedSize === file.size) return;
+
+    await unlink(localPath).catch(() => undefined);
+
+    if (attempt === DOWNLOAD_SIZE_CHECK_MAX_ATTEMPTS) {
+      throw new Error(
+        `Download size mismatch for ${file.path}: expected ${file.size} bytes, got ${downloadedSize} bytes (after ${attempt} attempts)`,
+      );
+    }
+
+    logger.warn('Gardners download size mismatch, retrying', {
+      path: file.path,
+      expectedSize: file.size,
+      downloadedSize,
+      attempt,
+    });
+  }
 }
 
 /**

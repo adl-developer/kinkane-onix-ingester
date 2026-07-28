@@ -2,16 +2,25 @@ import { Request, Response } from 'express';
 import { z } from 'zod';
 import { config } from '../config';
 import { gardnersBootstrapService } from '../services/gardners/bootstrap.service';
+import { gardnersCoverService } from '../services/gardners/gardners-cover-sync.service';
 import { logger } from '../lib/logger';
 
+// Live-verified up to 20 concurrent FTP connections against
+// covers.gardners.com (zero failures, ~12x throughput over one
+// connection) — capped at 50 as an untested-beyond-this safety ceiling,
+// not a confirmed-safe value. Gardners has never documented a
+// concurrency limit for this server.
+const concurrencySchema = z.coerce.number().int().min(1).max(50).optional();
+const batchSizeSchema = z.coerce.number().int().min(1).max(10_000).optional();
+
 const bootstrapSchema = z.object({
-  coverBatchSize: z.coerce.number().int().min(1).max(10_000).optional(),
-  // Live-verified up to 20 concurrent FTP connections against
-  // covers.gardners.com (zero failures, ~12x throughput over one
-  // connection) — capped at 50 as an untested-beyond-this safety ceiling,
-  // not a confirmed-safe value. Gardners has never documented a
-  // concurrency limit for this server.
-  coverConcurrency: z.coerce.number().int().min(1).max(50).optional(),
+  coverBatchSize: batchSizeSchema,
+  coverConcurrency: concurrencySchema,
+});
+
+const coversBackfillSchema = z.object({
+  batchSize: batchSizeSchema,
+  concurrency: concurrencySchema,
 });
 
 export const gardnersController = {
@@ -59,5 +68,52 @@ export const gardnersController = {
       const e = err as Error;
       logger.error('Gardners bootstrap failed', { error: e.message });
     });
+  },
+
+  /**
+   * POST /gardners/covers/backfill
+   * Body (optional): { batchSize?: number, concurrency?: number }
+   *
+   * Runs just the concurrent cover backfill against covers.gardners.com for
+   * books that already exist — skips ONIX ingestion and every other Gardners
+   * feed entirely, unlike /bootstrap. Use this when the catalogue is already
+   * loaded and only covers need catching up. Responds 202 immediately;
+   * progress is logged.
+   *
+   * Same gating as /bootstrap: refuses to run (403) unless
+   * GARDNERS_INGESTION_ENABLED=true.
+   */
+  async coversBackfill(req: Request, res: Response): Promise<void> {
+    if (!config.gardners.ingestionEnabled) {
+      res.status(403).json({
+        error:
+          'Gardners ingestion is disabled (GARDNERS_INGESTION_ENABLED is not "true") — refusing to run the cover backfill.',
+      });
+      return;
+    }
+
+    const parsed = coversBackfillSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: parsed.error.flatten().fieldErrors });
+      return;
+    }
+
+    res.status(202).json({
+      message:
+        'Gardners cover backfill started — walks every book with an ISBN13 against covers.gardners.com. Follow progress in the logs.',
+    });
+
+    gardnersCoverService
+      .runConcurrentFullCatalogueSync({
+        batchSize: parsed.data.batchSize,
+        concurrency: parsed.data.concurrency,
+      })
+      .then((totalProcessed) => {
+        logger.info('Gardners cover backfill complete', { totalProcessed });
+      })
+      .catch((err: unknown) => {
+        const e = err as Error;
+        logger.error('Gardners cover backfill failed', { error: e.message });
+      });
   },
 };

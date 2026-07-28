@@ -50,6 +50,14 @@ function r2KeyFor(feed: 'biblio_delta' | 'biblio_full', file: RemoteFileDescript
   return `${config.r2.onixPrefix}gardners-biblio-wk${week}-${suffix}.xml`;
 }
 
+// downloadToLocalFile's own size check only catches truncated transfers.
+// Observed live: fastGet can also hand back a file that matches the
+// expected byte count but is still corrupt mid-stream, which only surfaces
+// once unzipper tries to inflate it ("too many length or distance symbols").
+// Since that corruption isn't reliably reproducible, a full fresh
+// redownload-and-reunzip is retried a few times before giving up.
+const UNZIP_RETRY_MAX_ATTEMPTS = 3;
+
 /**
  * Downloads a remote ONIX zip to a local temp file (fastGet — see
  * downloadToLocalFile's doc comment for why plain streaming isn't used for
@@ -69,25 +77,39 @@ async function fetchAndLandInR2(
   const localZipPath = join(tmpdir(), `gardners-${cfg.feed}-${logId}.zip`);
 
   try {
-    await gardnersFetcher.downloadToLocalFile(cfg.connection, file, localZipPath);
+    for (let attempt = 1; attempt <= UNZIP_RETRY_MAX_ATTEMPTS; attempt++) {
+      await gardnersFetcher.downloadToLocalFile(cfg.connection, file, localZipPath);
 
-    const zipStream = createReadStream(localZipPath);
-    // unzipper.ParseOne() returns a Duplex that @aws-sdk/lib-storage's Body
-    // type guard doesn't recognize as valid stream input — pipe through a
-    // plain PassThrough to normalize it into an unambiguous Readable.
-    const xmlEntry = new PassThrough();
+      const zipStream = createReadStream(localZipPath);
+      // unzipper.ParseOne() returns a Duplex that @aws-sdk/lib-storage's Body
+      // type guard doesn't recognize as valid stream input — pipe through a
+      // plain PassThrough to normalize it into an unambiguous Readable.
+      const xmlEntry = new PassThrough();
 
-    // Plain `.pipe()` chains don't propagate upstream errors. stream/promises'
-    // pipeline() destroys the whole chain and rejects on any error. It races
-    // against the upload reading from the same xmlEntry, since both must run
-    // concurrently for a stream pipe.
-    await Promise.all([
-      pipeline(zipStream, unzipper.ParseOne(), xmlEntry),
-      // Uncompressed size isn't known upfront (only the zip's compressed
-      // size is), so this must go through the multipart uploader rather
-      // than a plain Content-Length PUT.
-      storageService.uploadStreamMultipart(r2Key, xmlEntry, 'application/xml'),
-    ]);
+      try {
+        // Plain `.pipe()` chains don't propagate upstream errors. stream/promises'
+        // pipeline() destroys the whole chain and rejects on any error. It races
+        // against the upload reading from the same xmlEntry, since both must run
+        // concurrently for a stream pipe.
+        await Promise.all([
+          pipeline(zipStream, unzipper.ParseOne(), xmlEntry),
+          // Uncompressed size isn't known upfront (only the zip's compressed
+          // size is), so this must go through the multipart uploader rather
+          // than a plain Content-Length PUT.
+          storageService.uploadStreamMultipart(r2Key, xmlEntry, 'application/xml'),
+        ]);
+        break;
+      } catch (unzipErr) {
+        await unlink(localZipPath).catch(() => undefined);
+        if (attempt === UNZIP_RETRY_MAX_ATTEMPTS) throw unzipErr;
+        logger.warn('Gardners Biblio unzip failed, redownloading and retrying', {
+          feed: cfg.feed,
+          filename: file.filename,
+          attempt,
+          error: unzipErr instanceof Error ? unzipErr.message : String(unzipErr),
+        });
+      }
+    }
 
     await gardnersFetcher.markFetchCompleted(logId, { r2Key });
     logger.info('Landed Gardners Biblio ONIX file in R2', {
