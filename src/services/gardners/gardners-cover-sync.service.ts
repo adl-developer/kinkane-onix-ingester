@@ -127,11 +127,30 @@ interface CoverCandidate {
 type CandidateOutcome = 'fetched' | 'notFound' | 'error';
 
 /**
- * Checks /Books/Full for one book's cover and uploads it to R2 if present,
- * marking gardnersCoverCheckedAt either way. Shared by both the sequential
- * (syncFullCatalogue) and concurrent (runConcurrentFullCatalogueSync) full-
- * catalogue backfills — this is the only part that actually talks to the
- * FTP server or the DB per book.
+ * basic-ftp throws a distinct FTPError (numeric `.code` — the actual FTP
+ * reply code) for a clean protocol-level response, separate from plain Node
+ * errors (ETIMEDOUT/ECONNRESET/ENOTFOUND — string `.code`) for network
+ * failures. Only a 550 "file unavailable" reply means the cover genuinely
+ * doesn't exist — live-verified: a random sample of books recorded as
+ * "not found" turned out to be ~75% false negatives, all traceable to a
+ * blanket `.catch(() => null)` that treated transient network errors during
+ * a loaded run identically to a real 550. A confirmed-missing sample came
+ * back 100% as exactly this code, so it's the only safe signal to treat as
+ * a genuine, permanent absence.
+ */
+function isFtpNotFoundError(err: unknown): boolean {
+  return (err as { code?: unknown } | undefined)?.code === 550;
+}
+
+/**
+ * Checks /Books/Full for one book's cover and uploads it to R2 if present.
+ * Only marks gardnersCoverCheckedAt on a genuine 550 not-found or a
+ * successful fetch — any other error (timeout, connection reset, DNS
+ * failure) leaves the book unchecked so it's simply retried on the next
+ * round/run instead of being permanently recorded as missing. Shared by
+ * both the sequential (syncFullCatalogue) and concurrent
+ * (runConcurrentFullCatalogueSync) full-catalogue backfills — this is the
+ * only part that actually talks to the FTP server or the DB per book.
  */
 async function processOneCandidate(
   client: GardnersRemoteClient,
@@ -140,13 +159,23 @@ async function processOneCandidate(
   const isbn13 = book.isbn13!;
   const remotePath = `/Books/Full/${isbn13.slice(0, 8)}/${isbn13}.jpg`;
 
+  let size: number;
   try {
-    const size = await client.size(remotePath).catch(() => null);
-    if (size === null) {
+    size = await client.size(remotePath);
+  } catch (err) {
+    if (isFtpNotFoundError(err)) {
       await db.update(books).set({ gardnersCoverCheckedAt: new Date() }).where(eq(books.id, book.id));
       return 'notFound';
     }
+    logger.error('Gardners cover existence check failed, leaving unchecked for retry', {
+      bookId: book.id,
+      isbn13,
+      error: err instanceof Error ? err.message : String(err),
+    });
+    return 'error';
+  }
 
+  try {
     const stream = await client.readStream(remotePath);
     const key = r2KeyForCover(isbn13);
     await storageService.uploadStream(key, stream, 'image/jpeg', size);
@@ -156,12 +185,11 @@ async function processOneCandidate(
       .where(eq(books.id, book.id));
     return 'fetched';
   } catch (err) {
-    logger.error('Gardners full-catalogue cover fetch failed', {
+    logger.error('Gardners cover download/upload failed, leaving unchecked for retry', {
       bookId: book.id,
       isbn13,
       error: err instanceof Error ? err.message : String(err),
     });
-    await db.update(books).set({ gardnersCoverCheckedAt: new Date() }).where(eq(books.id, book.id));
     return 'error';
   }
 }
@@ -231,6 +259,57 @@ async function syncFullCatalogue(overrides?: {
   return candidates.length;
 }
 
+// A worker's *connection* (not an individual book — processOneCandidate
+// already catches those) can fail outright, e.g. a DNS blip on the control
+// socket (observed live: "getaddrinfo ENOTFOUND covers.gardners.com").
+// Without this, that one rejection propagates out of Promise.all and kills
+// every other worker's in-flight progress for the round too. Reconnecting
+// and resuming from wherever the queue left off survives a transient
+// failure; if the connection is still bad after a few tries, this worker
+// gives up on its remaining queue (those candidates simply reappear as
+// unprocessed in the next round's fetchCandidates query — nothing is lost)
+// instead of taking the whole batch down with it.
+const WORKER_RECONNECT_MAX_ATTEMPTS = 3;
+const WORKER_RECONNECT_DELAY_MS = 5_000;
+
+async function processQueueWithReconnect(
+  queue: CoverCandidate[],
+  roundOutcomes: CandidateOutcome[],
+): Promise<void> {
+  let index = 0;
+
+  for (let attempt = 1; attempt <= WORKER_RECONNECT_MAX_ATTEMPTS; attempt++) {
+    try {
+      await gardnersConnections.withCoversFtp(async (client) => {
+        while (index < queue.length) {
+          roundOutcomes.push(await processOneCandidate(client, queue[index]));
+          index++;
+        }
+      });
+      return;
+    } catch (err) {
+      const remaining = queue.length - index;
+      const error = err instanceof Error ? err.message : String(err);
+
+      if (attempt === WORKER_RECONNECT_MAX_ATTEMPTS) {
+        logger.error('Gardners cover worker giving up after repeated connection failures', {
+          remaining,
+          attempts: attempt,
+          error,
+        });
+        return;
+      }
+
+      logger.warn('Gardners cover worker connection failed, reconnecting and resuming', {
+        remaining,
+        attempt,
+        error,
+      });
+      await new Promise((res) => setTimeout(res, WORKER_RECONNECT_DELAY_MS));
+    }
+  }
+}
+
 /**
  * Same backfill as syncFullCatalogue, but spreads the work across several
  * FTP connections running in parallel instead of one sequential connection
@@ -248,8 +327,10 @@ async function syncFullCatalogue(overrides?: {
  * Each round fetches concurrency*batchSize candidates, splits them
  * round-robin across `concurrency` workers, and each worker holds one FTP
  * connection open for the whole round (rather than reconnecting per book)
- * before the next round is fetched. Loops until a round comes back empty.
- * Returns the total number of candidates processed across all rounds.
+ * before the next round is fetched, reconnecting via processQueueWithReconnect
+ * if its connection drops mid-round rather than failing the whole round.
+ * Loops until a round comes back empty. Returns the total number of
+ * candidates processed across all rounds.
  */
 async function runConcurrentFullCatalogueSync(overrides?: {
   concurrency?: number;
@@ -270,15 +351,7 @@ async function runConcurrentFullCatalogueSync(overrides?: {
     candidates.forEach((c, i) => queues[i % workerCount].push(c));
 
     const roundOutcomes: CandidateOutcome[] = [];
-    await Promise.all(
-      queues.map((queue) =>
-        gardnersConnections.withCoversFtp(async (client) => {
-          for (const book of queue) {
-            roundOutcomes.push(await processOneCandidate(client, book));
-          }
-        }),
-      ),
-    );
+    await Promise.all(queues.map((queue) => processQueueWithReconnect(queue, roundOutcomes)));
 
     totalProcessed += candidates.length;
     logger.info('Gardners concurrent cover full-catalogue sync: round complete', {
