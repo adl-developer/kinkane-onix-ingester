@@ -1,4 +1,4 @@
-# 1.0.0 (2026-07-19)
+# 1.0.0 (2026-07-28)
 
 
 ### Bug Fixes
@@ -31,6 +31,7 @@
 * add Promotions, isbn-slips, Firm Sale, and mkres feeds (Step 5) ([fe9496f](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/fe9496f0c61520dd1977ecd3de29adb022022d3d))
 * backfill bookId on gardners_stock rows after each chunk upsert ([50f7d4b](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/50f7d4be765ac24789d3311cc5247f3ebc0f4e9d))
 * extend admin token expiry from 30m to 72h ([98380cf](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/98380cf6435128659b0792a009321bbcc2d583de))
+* load the full catalogue from GARDBIB in /gardners/bootstrap ([293bc12](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/293bc126c2ac7f330ff52f86689bb6f10b24e350))
 * make Google Books cover fallback a true last resort ([b355637](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/b355637bb381f5bffc47790ab26a39e57c10511b))
 * move chunk payloads from PostgreSQL JSONB to R2 object storage ([bcf2404](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/bcf240446d3f6b12fd6d8615110ca147a168afb0))
 * run the cover backfill over multiple concurrent FTP connections ([d179c9f](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/d179c9f2d1365c48125eb7a075c7cafa3a6158f6))
@@ -38,7 +39,7 @@
 
 ### Performance Improvements
 
-* batch per-book DB writes in chunk worker instead of one row at a time ([e02fb65](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/e02fb653d8bda36b2d92f599662338c554562544))
+* batch per-book DB writes in chunk worker instead of one row at a time ([c98fba2](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/c98fba2df66ce875628a6f911ed1129cf15c9e0d))
 
 
 ### Reverts

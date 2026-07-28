@@ -19,4 +19,10 @@ const client = postgres(config.database.url, {
 
 export const db = drizzle(client, { schema });
 
+// The raw postgres.js client, for the few places that need a driver feature
+// drizzle doesn't surface — currently only COPY ... FROM STDIN streaming in
+// gardbib.service.ts, which is what makes a 2M-record load finish in minutes
+// instead of hours.
+export const pgClient = client;
+
 export type DB = typeof db;
