@@ -26,3 +26,6 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+# One-off operational scripts (DB resets, progress pollers) — never committed
+*.tmp.mjs
+*-tmp.js

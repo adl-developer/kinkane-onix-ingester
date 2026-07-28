@@ -32,7 +32,7 @@
 * add POST /api/ingestion/backfill-embeddings admin endpoint ([1f1b831](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/1f1b8311e048461827fe4a4891c59e0556910f47))
 * add Promotions, isbn-slips, Firm Sale, and mkres feeds (Step 5) ([fe9496f](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/fe9496f0c61520dd1977ecd3de29adb022022d3d))
 * backfill bookId on gardners_stock rows after each chunk upsert ([50f7d4b](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/50f7d4be765ac24789d3311cc5247f3ebc0f4e9d))
-* **excerpts:** paginate the Jellybooks full sync and expose a manual trigger ([e3e53aa](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/e3e53aa219761841d65bb44d02a6d9f53214dece))
+* **excerpts:** paginate the Jellybooks full sync and expose a manual trigger ([af1084c](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/af1084c2dbceaf03c53c329b4db87285fa21a95a))
 * extend admin token expiry from 30m to 72h ([98380cf](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/98380cf6435128659b0792a009321bbcc2d583de))
 * **gardners:** add POST /gardners/covers/backfill ([92be61c](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/92be61caa9ad396440ba7dbb2c7ac670fe16106f))
 * load the full catalogue from GARDBIB in /gardners/bootstrap ([b4353c0](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/b4353c0551211e0d8119eaace1b67ffdac0ec052))
