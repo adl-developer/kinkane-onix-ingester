@@ -15,6 +15,16 @@ import { logger } from '../../lib/logger';
 export type GardnersFeed = (typeof gardnersFeedEnum.enumValues)[number];
 export type { RemoteFileDescriptor, GardnersRemoteClient, GardnersConnectionName };
 
+/** Feed-level totals for the "this whole feed finished" log line. */
+export interface FeedRunSummary {
+  feed: string;
+  filename: string;
+  totalChunks: number | null;
+  processedChunks: number | null;
+  rowCount: number | null;
+  elapsedSec: number | null;
+}
+
 export interface FetchFeedConfig {
   feed: GardnersFeed;
   connection: GardnersConnectionName;
@@ -310,11 +320,17 @@ async function setChunkingComplete(
  */
 async function incrementProcessedChunks(
   logId: number,
-): Promise<{ isComplete: boolean; syncedAt: Date }> {
+): Promise<{ isComplete: boolean; syncedAt: Date; summary: FeedRunSummary }> {
   const rows = await db.execute<{
     status: string;
     was_completed: boolean;
     remote_modified_at: string | null;
+    feed: string;
+    remote_filename: string;
+    total_chunks: number | null;
+    processed_chunks: number | null;
+    row_count: number | null;
+    elapsed_sec: number | null;
   }>(sql`
     WITH prev AS (
       SELECT status = 'completed' AS was_completed
@@ -335,13 +351,30 @@ async function incrementProcessedChunks(
       END
     FROM prev
     WHERE gardners_fetch_log.id = ${logId}
-    RETURNING gardners_fetch_log.status, prev.was_completed, gardners_fetch_log.remote_modified_at
+    RETURNING
+      gardners_fetch_log.status,
+      prev.was_completed,
+      gardners_fetch_log.remote_modified_at,
+      gardners_fetch_log.feed,
+      gardners_fetch_log.remote_filename,
+      gardners_fetch_log.total_chunks,
+      gardners_fetch_log.processed_chunks,
+      gardners_fetch_log.row_count,
+      EXTRACT(EPOCH FROM (NOW() - gardners_fetch_log.started_at))::int AS elapsed_sec
   `);
 
   const row = rows[0];
   return {
     isComplete: row?.status === 'completed' && !row?.was_completed,
     syncedAt: row?.remote_modified_at ? new Date(row.remote_modified_at) : new Date(),
+    summary: {
+      feed: row?.feed ?? 'unknown',
+      filename: row?.remote_filename ?? 'unknown',
+      totalChunks: row?.total_chunks ?? null,
+      processedChunks: row?.processed_chunks ?? null,
+      rowCount: row?.row_count ?? null,
+      elapsedSec: row?.elapsed_sec ?? null,
+    },
   };
 }
 

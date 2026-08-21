@@ -9,7 +9,7 @@
 * commit missing Gardners npm dependencies to package.json ([f749ebf](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/f749ebf1b8fe89c4e05acd51f92c50fc7fa812b1))
 * detect SSL requirement from the connection string, not NODE_ENV ([06d4881](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/06d4881cdf1220255e7d61fe91c1157aa560e85a))
 * **gardners:** only treat FTP 550 as a genuinely missing cover ([a2c0cf0](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/a2c0cf0e61f055100873e6ec77acda35ac04239f))
-* **gardners:** supervise the cover backfill so it survives early stops ([36d5fe9](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/36d5fe9ed503b07f37cc4ca6deaa0f1b768d9f2d))
+* **gardners:** supervise the cover backfill so it survives early stops ([0afaf6b](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/0afaf6b068d4bf2bd23f2cec544d9cd2bb886226))
 * **gardners:** verify download integrity and retry corrupt transfers ([22d41cf](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/22d41cf8c60fa121d741be62942fe01515bba26a))
 * pin embedding output dimension and run backfill in background ([0c9b73b](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/0c9b73b3b1c3a883a2471cf87846bdb71466595f))
 * raise DB connection pool size to cover real worker concurrency ([4cd2119](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/4cd2119af53cb19bc483a4716f75f9f61f9a284b))
@@ -39,6 +39,7 @@
 * load the full catalogue from GARDBIB in /gardners/bootstrap ([b4353c0](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/b4353c0551211e0d8119eaace1b67ffdac0ec052))
 * make Google Books cover fallback a true last resort ([b355637](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/b355637bb381f5bffc47790ab26a39e57c10511b))
 * move chunk payloads from PostgreSQL JSONB to R2 object storage ([bcf2404](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/bcf240446d3f6b12fd6d8615110ca147a168afb0))
+* **observability:** log run completions and add health/stats endpoints ([b3bd0de](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/b3bd0de845197e58d2f15620cc3318cd4a00b666))
 * run the cover backfill over multiple concurrent FTP connections ([d179c9f](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/d179c9f2d1365c48125eb7a075c7cafa3a6158f6))
 
 

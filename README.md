@@ -12,6 +12,7 @@ A production-ready Node.js service that ingests ONIX 3.1 XML feeds from Cloudfla
 - [Why These Decisions Were Made](#why-these-decisions-were-made)
 - [End-to-End Flow](#end-to-end-flow)
 - [API Reference](#api-reference)
+- [Monitoring & Health](#monitoring--health)
 - [Database Schema](#database-schema)
 - [Project Structure](#project-structure)
 - [Environment Variables](#environment-variables)
@@ -248,7 +249,22 @@ chunk.worker (concurrency=5, runs in parallel with file.worker)
 
 ## API Reference
 
-All routes require `Authorization: Bearer <jwt>`. Get a token from `POST /auth/token`.
+All routes require `Authorization: Bearer <jwt>`, except the two public health
+checks noted below. Get a token from `POST /auth/token`.
+
+### Health
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| GET | `/health` | public | Liveness. Touches no dependencies — point uptime monitors here |
+| GET | `/health/ready` | public | Readiness: pings Postgres and Redis. `200` when both answer, `503` otherwise |
+| GET | `/health/stats?windowHours&failureLimit` | admin JWT | Run statistics across both pipelines |
+
+`/health/stats` returns ONIX job counts and the last file that landed, the most
+recent run per Gardners feed, BullMQ queue depths, and recent failures from both
+pipelines. `windowHours` defaults to 24 (max 720) and `failureLimit` to 10 (max
+100). It is admin-gated because the payload includes remote filenames and raw
+error messages.
 
 ### Auth
 
@@ -272,6 +288,58 @@ All routes require `Authorization: Bearer <jwt>`. Get a token from `POST /auth/t
 | Path | Description |
 |------|-------------|
 | `/bull-board` | Queue dashboard (requires admin JWT cookie or header) |
+
+---
+
+## Monitoring & Health
+
+### Is it up?
+
+```bash
+curl -fsS https://<host>/api/health
+```
+
+`/api/health` is dependency-free, so it answers as long as the process can
+serve a request. `/api/health/ready` additionally pings Postgres and Redis and
+returns `503` when either is unreachable — that's the one that distinguishes
+"running" from "running and able to do work".
+
+### Did the last run succeed?
+
+Every scheduled job emits a matched pair of structured log lines:
+
+```
+{"level":"info","message":"Cron tick started","job":"gardners-inventory"}
+{"level":"info","message":"Cron tick complete","job":"gardners-inventory","durationMs":41233}
+```
+
+A tick that throws logs `Cron tick failed` with the error and duration instead.
+Because the pair is guaranteed, a `started` with no matching `complete` or
+`failed` means the process died mid-tick — which silence alone could never tell
+you.
+
+The feed crons only *enqueue* work; the pipeline result arrives later from the
+workers. Two rollup lines mark a whole file or feed as landed:
+
+```
+{"message":"ONIX file ingestion complete","fileKey":"onix/...","totalBooks":1000,"elapsedSec":92}
+{"message":"Gardners feed ingestion complete","feed":"inventory","rowCount":1795203,"elapsedSec":1162}
+```
+
+These fire exactly once per file/feed, on the transition to `completed`. Alert
+on their absence rather than on individual chunk-completion lines, of which a
+large feed produces hundreds.
+
+### General stats
+
+`GET /api/health/stats` (admin JWT) rolls the same information up from the
+database, for when you want current state rather than a log stream:
+
+- `onix` — job counts by status in the window, plus the last file that landed
+- `gardners.feeds` — most recent run per feed with status, row count, and
+  timestamps. A `lastRunAt` days old on a daily feed is the staleness signal
+- `queues` — BullMQ `waiting`/`active`/`delayed`/`failed` depths per queue
+- `recentFailures` — newest failures across both pipelines with error messages
 
 ---
 
