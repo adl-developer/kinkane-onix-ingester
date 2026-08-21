@@ -194,22 +194,33 @@ async function processOneCandidate(
   }
 }
 
-async function fetchCandidates(batchSize: number): Promise<CoverCandidate[]> {
+function candidatePredicate() {
   const thirtyDaysAgo = new Date(Date.now() - THIRTY_DAYS_MS);
 
+  return and(
+    sql`${books.isbn13} IS NOT NULL`,
+    or(
+      isNull(books.gardnersCoverCheckedAt),
+      and(isNull(books.coverUrl), lt(books.gardnersCoverCheckedAt, thirtyDaysAgo)),
+    ),
+  );
+}
+
+async function fetchCandidates(batchSize: number): Promise<CoverCandidate[]> {
   return db
     .select({ id: books.id, isbn13: books.isbn13 })
     .from(books)
-    .where(
-      and(
-        sql`${books.isbn13} IS NOT NULL`,
-        or(
-          isNull(books.gardnersCoverCheckedAt),
-          and(isNull(books.coverUrl), lt(books.gardnersCoverCheckedAt, thirtyDaysAgo)),
-        ),
-      ),
-    )
+    .where(candidatePredicate())
     .limit(batchSize);
+}
+
+/** How many books still need a cover attempt — what the supervisor uses to decide whether to relaunch. */
+async function countRemainingCandidates(): Promise<number> {
+  const [row] = await db
+    .select({ n: sql<number>`count(*)::int` })
+    .from(books)
+    .where(candidatePredicate());
+  return row?.n ?? 0;
 }
 
 /**
@@ -271,6 +282,23 @@ async function syncFullCatalogue(overrides?: {
 // instead of taking the whole batch down with it.
 const WORKER_RECONNECT_MAX_ATTEMPTS = 3;
 const WORKER_RECONNECT_DELAY_MS = 5_000;
+
+// A "bad round" is one that either couldn't query candidates or advanced no
+// books at all. Transient (an FTP wobble, a DB blip) is the common case, so
+// back off and retry rather than ending a multi-hour run — but stop eventually
+// so a genuinely broken environment doesn't hammer Gardners indefinitely.
+const MAX_CONSECUTIVE_BAD_ROUNDS = 8;
+const BAD_ROUND_BASE_DELAY_MS = 10_000;
+const BAD_ROUND_MAX_DELAY_MS = 5 * 60_000;
+
+function badRoundDelayMs(consecutive: number): number {
+  return Math.min(BAD_ROUND_BASE_DELAY_MS * 2 ** (consecutive - 1), BAD_ROUND_MAX_DELAY_MS);
+}
+
+// Relaunch cadence for the supervisor. Generous because the common reason a
+// run ends early is the environment (network, laptop sleep), not the data.
+const SUPERVISOR_RESTART_DELAY_MS = 30_000;
+const SUPERVISOR_MAX_RESTARTS = 100;
 
 async function processQueueWithReconnect(
   queue: CoverCandidate[],
@@ -341,34 +369,190 @@ async function runConcurrentFullCatalogueSync(overrides?: {
   const roundSize = batchSize * concurrency;
 
   let totalProcessed = 0;
+  let consecutiveBadRounds = 0;
 
   for (;;) {
-    const candidates = await fetchCandidates(roundSize);
-    if (candidates.length === 0) break;
+    let candidates: CoverCandidate[];
+    try {
+      candidates = await fetchCandidates(roundSize);
+    } catch (err) {
+      // A dropped DB connection here used to propagate straight out of this
+      // loop and silently end an otherwise healthy multi-hour run.
+      consecutiveBadRounds++;
+      if (consecutiveBadRounds >= MAX_CONSECUTIVE_BAD_ROUNDS) {
+        logger.error('Gardners cover sync: giving up after repeated candidate-query failures', {
+          consecutiveBadRounds,
+          totalProcessed,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        return totalProcessed;
+      }
+      const delay = badRoundDelayMs(consecutiveBadRounds);
+      logger.warn('Gardners cover sync: candidate query failed, retrying', {
+        consecutiveBadRounds,
+        delayMs: delay,
+        error: err instanceof Error ? err.message : String(err),
+      });
+      await new Promise((res) => setTimeout(res, delay));
+      continue;
+    }
+
+    if (candidates.length === 0) {
+      logger.info('Gardners concurrent cover full-catalogue sync: no candidates left', {
+        totalProcessed,
+      });
+      return totalProcessed;
+    }
 
     const workerCount = Math.min(concurrency, candidates.length);
     const queues: CoverCandidate[][] = Array.from({ length: workerCount }, () => []);
     candidates.forEach((c, i) => queues[i % workerCount].push(c));
 
     const roundOutcomes: CandidateOutcome[] = [];
-    await Promise.all(queues.map((queue) => processQueueWithReconnect(queue, roundOutcomes)));
+    try {
+      await Promise.all(queues.map((queue) => processQueueWithReconnect(queue, roundOutcomes)));
+    } catch (err) {
+      logger.error('Gardners cover sync: round failed unexpectedly', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
 
-    totalProcessed += candidates.length;
+    // 'error' outcomes leave gardnersCoverCheckedAt NULL, so those books come
+    // straight back in the next round's query. A round where nothing advanced
+    // means we'd re-fetch the same candidates immediately — back off instead
+    // of hot-spinning against a struggling FTP server.
+    const advanced = roundOutcomes.filter((o) => o !== 'error').length;
+    totalProcessed += advanced;
+
     logger.info('Gardners concurrent cover full-catalogue sync: round complete', {
       roundSize: candidates.length,
       concurrency: workerCount,
       fetched: roundOutcomes.filter((o) => o === 'fetched').length,
       notFound: roundOutcomes.filter((o) => o === 'notFound').length,
       errors: roundOutcomes.filter((o) => o === 'error').length,
+      advanced,
       totalProcessed,
     });
-  }
 
-  return totalProcessed;
+    if (advanced === 0) {
+      consecutiveBadRounds++;
+      if (consecutiveBadRounds >= MAX_CONSECUTIVE_BAD_ROUNDS) {
+        logger.error('Gardners cover sync: giving up after repeated rounds with no progress', {
+          consecutiveBadRounds,
+          totalProcessed,
+        });
+        return totalProcessed;
+      }
+      const delay = badRoundDelayMs(consecutiveBadRounds);
+      logger.warn('Gardners cover sync: round made no progress, backing off', {
+        consecutiveBadRounds,
+        delayMs: delay,
+      });
+      await new Promise((res) => setTimeout(res, delay));
+    } else {
+      consecutiveBadRounds = 0;
+    }
+  }
+}
+
+// Guards against two backfills running at once. Re-triggering while a run is
+// already going doubles the FTP connection count against covers.gardners.com
+// (observed live: control- and data-socket timeouts across every worker, and
+// R2 uploads blowing their 60s timeout, when overlapping runs saturated the
+// link) — and neither run can tell it's happening.
+let backfillInFlight = false;
+
+export function isCoverBackfillRunning(): boolean {
+  return backfillInFlight;
+}
+
+/**
+ * Runs the concurrent backfill to completion, relaunching it whenever it stops
+ * with candidates still outstanding.
+ *
+ * runConcurrentFullCatalogueSync is a long-lived in-memory loop, so anything
+ * that ends it early — a network partition, an exhausted retry budget, an
+ * unexpected throw — leaves the backfill stopped with no way to notice except
+ * watching the database go quiet. Observed live over one morning: four
+ * consecutive runs died after 7h50m, 45m, 40m and 14m, each needing a manual
+ * re-trigger. This wrapper turns those into automatic restarts.
+ *
+ * It cannot survive the process itself dying (laptop sleep, a crash, a
+ * redeploy) — nothing in-process can. For that, run the ingester somewhere
+ * that stays up.
+ */
+async function runSupervisedFullCatalogueSync(overrides?: {
+  concurrency?: number;
+  batchSize?: number;
+}): Promise<void> {
+  if (backfillInFlight) {
+    logger.warn('Gardners cover backfill already running — ignoring duplicate trigger');
+    return;
+  }
+  backfillInFlight = true;
+
+  const startedAt = Date.now();
+  let grandTotal = 0;
+
+  try {
+    for (let attempt = 1; attempt <= SUPERVISOR_MAX_RESTARTS; attempt++) {
+      try {
+        grandTotal += await runConcurrentFullCatalogueSync(overrides);
+      } catch (err) {
+        logger.error('Gardners cover backfill run threw', {
+          attempt,
+          error: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      let remaining: number;
+      try {
+        remaining = await countRemainingCandidates();
+      } catch (err) {
+        // Can't tell whether we're done; assume not and let the delay ride.
+        logger.warn('Gardners cover backfill: could not count remaining candidates', {
+          attempt,
+          error: err instanceof Error ? err.message : String(err),
+        });
+        remaining = -1;
+      }
+
+      if (remaining === 0) {
+        logger.info('Gardners cover backfill: complete', {
+          attempts: attempt,
+          grandTotal,
+          elapsedMin: ((Date.now() - startedAt) / 60_000).toFixed(1),
+        });
+        return;
+      }
+
+      if (attempt === SUPERVISOR_MAX_RESTARTS) {
+        logger.error('Gardners cover backfill: restart limit reached, stopping', {
+          attempts: attempt,
+          remaining,
+          grandTotal,
+        });
+        return;
+      }
+
+      logger.warn('Gardners cover backfill stopped early — relaunching', {
+        attempt,
+        remaining,
+        grandTotal,
+        delayMs: SUPERVISOR_RESTART_DELAY_MS,
+      });
+      await new Promise((res) => setTimeout(res, SUPERVISOR_RESTART_DELAY_MS));
+    }
+  } finally {
+    backfillInFlight = false;
+  }
 }
 
 export const gardnersCoverService = {
   syncWeeklyUpdates,
   syncFullCatalogue,
   runConcurrentFullCatalogueSync,
+  runSupervisedFullCatalogueSync,
+  countRemainingCandidates,
+  isCoverBackfillRunning,
 };

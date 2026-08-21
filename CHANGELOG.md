@@ -1,4 +1,4 @@
-# 1.0.0 (2026-07-28)
+# 1.0.0 (2026-08-21)
 
 
 ### Bug Fixes
@@ -9,6 +9,7 @@
 * commit missing Gardners npm dependencies to package.json ([f749ebf](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/f749ebf1b8fe89c4e05acd51f92c50fc7fa812b1))
 * detect SSL requirement from the connection string, not NODE_ENV ([06d4881](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/06d4881cdf1220255e7d61fe91c1157aa560e85a))
 * **gardners:** only treat FTP 550 as a genuinely missing cover ([a2c0cf0](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/a2c0cf0e61f055100873e6ec77acda35ac04239f))
+* **gardners:** supervise the cover backfill so it survives early stops ([36d5fe9](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/36d5fe9ed503b07f37cc4ca6deaa0f1b768d9f2d))
 * **gardners:** verify download integrity and retry corrupt transfers ([22d41cf](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/22d41cf8c60fa121d741be62942fe01515bba26a))
 * pin embedding output dimension and run backfill in background ([0c9b73b](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/0c9b73b3b1c3a883a2471cf87846bdb71466595f))
 * raise DB connection pool size to cover real worker concurrency ([4cd2119](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/4cd2119af53cb19bc483a4716f75f9f61f9a284b))
