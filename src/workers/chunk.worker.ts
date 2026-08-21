@@ -520,7 +520,30 @@ async function processChunkJob(job: Job<ChunkJobData>): Promise<ChunkJobResult> 
   // 'failed' over a handful of bad records used to make listUnprocessedR2Files
   // treat an otherwise-finished file as untouched, causing the daily R2 poll
   // cron to silently re-trigger and fully reprocess it from scratch.
-  await db.execute(sql`
+  // RETURNING + the pre-update status is what lets us log the file-level
+  // rollup exactly once. Without it the transition to 'completed' happens
+  // silently in SQL: every chunk logs its own completion, but nothing ever
+  // says the *file* finished, so "did last night's ingest land?" could only
+  // be answered by querying ingestion_jobs by hand.
+  const rollup = await db.execute<{
+    file_key: string;
+    status: string;
+    was_completed: boolean;
+    total_chunks: number | null;
+    failed_chunks: number | null;
+    total_books: number | null;
+    processed_books: number | null;
+    elapsed_sec: number | null;
+  }>(sql`
+    WITH prev AS (
+      -- FOR UPDATE serialises the concurrent chunk workers here, so exactly
+      -- one of them observes the not-yet-completed -> completed transition
+      -- and the rollup below logs once per file, not once per racing chunk.
+      SELECT status = 'completed' AS was_completed
+      FROM ingestion_jobs
+      WHERE id = ${ingestionJobId}
+      FOR UPDATE
+    )
     UPDATE ingestion_jobs
     SET
       status = CASE
@@ -532,8 +555,32 @@ async function processChunkJob(job: Job<ChunkJobData>): Promise<ChunkJobResult> 
         ELSE completed_at
       END,
       updated_at = NOW()
-    WHERE id = ${ingestionJobId}
+    FROM prev
+    WHERE ingestion_jobs.id = ${ingestionJobId}
+    RETURNING
+      ingestion_jobs.file_key,
+      ingestion_jobs.status,
+      prev.was_completed,
+      ingestion_jobs.total_chunks,
+      ingestion_jobs.failed_chunks,
+      ingestion_jobs.total_books,
+      ingestion_jobs.processed_books,
+      EXTRACT(EPOCH FROM (NOW() - ingestion_jobs.created_at))::int AS elapsed_sec
   `);
+
+  const jobRow = rollup[0];
+  if (jobRow && jobRow.status === 'completed' && !jobRow.was_completed) {
+    logger.info('ONIX file ingestion complete', {
+      worker: 'chunk',
+      ingestionJobId,
+      fileKey: jobRow.file_key,
+      totalChunks: jobRow.total_chunks,
+      failedChunks: jobRow.failed_chunks,
+      totalBooks: jobRow.total_books,
+      processedBooks: jobRow.processed_books,
+      elapsedSec: jobRow.elapsed_sec,
+    });
+  }
 
   // Only delete the R2 payload once the chunk's completion is durably
   // recorded above, and only clear dataKey once the delete itself succeeds.

@@ -109,9 +109,22 @@ async function processGardnersChunkJob(
 
   const { processed, failed } = await upsertChunk(feed, chunkKey);
 
-  const { isComplete, syncedAt } = await gardnersFetcher.incrementProcessedChunks(logId);
+  const { isComplete, syncedAt, summary } = await gardnersFetcher.incrementProcessedChunks(logId);
   if (isComplete) {
     await sweepIfFullReplaceFeed(feed, syncedAt);
+
+    // The feed-level "it landed" line. Individual chunks each log their own
+    // completion, but a large feed produces hundreds of those and none of
+    // them says the feed as a whole is done — this is the one to alert on.
+    logger.info('Gardners feed ingestion complete', {
+      worker: 'gardners-chunk',
+      feed: summary.feed,
+      logId,
+      filename: summary.filename,
+      totalChunks: summary.totalChunks,
+      rowCount: summary.rowCount,
+      elapsedSec: summary.elapsedSec,
+    });
   }
 
   // Only delete the R2 payload on full success, and only after the chunk's

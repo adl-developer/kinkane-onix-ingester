@@ -98,22 +98,28 @@ export const gardnersController = {
       return;
     }
 
+    // Overlapping backfills saturate the FTP link and neither run can tell —
+    // reject the duplicate instead of quietly doubling the connection count.
+    if (gardnersCoverService.isCoverBackfillRunning()) {
+      res.status(409).json({
+        error: 'A Gardners cover backfill is already running — let it finish, or restart the process to cancel it.',
+      });
+      return;
+    }
+
     res.status(202).json({
       message:
-        'Gardners cover backfill started — walks every book with an ISBN13 against covers.gardners.com. Follow progress in the logs.',
+        'Gardners cover backfill started — walks every book with an ISBN13 against covers.gardners.com. Relaunches itself if a run stops early; follow progress in the logs.',
     });
 
     gardnersCoverService
-      .runConcurrentFullCatalogueSync({
+      .runSupervisedFullCatalogueSync({
         batchSize: parsed.data.batchSize,
         concurrency: parsed.data.concurrency,
       })
-      .then((totalProcessed) => {
-        logger.info('Gardners cover backfill complete', { totalProcessed });
-      })
       .catch((err: unknown) => {
         const e = err as Error;
-        logger.error('Gardners cover backfill failed', { error: e.message });
+        logger.error('Gardners cover backfill supervisor failed', { error: e.message });
       });
   },
 };
