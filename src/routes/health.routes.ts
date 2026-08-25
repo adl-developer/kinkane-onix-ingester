@@ -27,4 +27,12 @@ router.get('/ready', healthController.ready);
  */
 router.get('/stats', requireAdminToken, healthController.stats);
 
+/**
+ * GET /health/counts
+ * Catalogue size and enrichment coverage — books, covers, excerpts,
+ * embeddings. The only view that shows whether covers and excerpts are
+ * actually landing; neither writes fetch-log rows visible in /stats.
+ */
+router.get('/counts', requireAdminToken, healthController.counts);
+
 export default router;

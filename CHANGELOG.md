@@ -1,4 +1,4 @@
-# 1.0.0 (2026-08-21)
+# 1.0.0 (2026-08-25)
 
 
 ### Bug Fixes
@@ -39,7 +39,8 @@
 * load the full catalogue from GARDBIB in /gardners/bootstrap ([b4353c0](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/b4353c0551211e0d8119eaace1b67ffdac0ec052))
 * make Google Books cover fallback a true last resort ([b355637](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/b355637bb381f5bffc47790ab26a39e57c10511b))
 * move chunk payloads from PostgreSQL JSONB to R2 object storage ([bcf2404](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/bcf240446d3f6b12fd6d8615110ca147a168afb0))
-* **observability:** log run completions and add health/stats endpoints ([b3bd0de](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/b3bd0de845197e58d2f15620cc3318cd4a00b666))
+* **observability:** add health/counts endpoint for catalogue coverage ([e076baf](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/e076bafc2a82a1d396a69405fabea5652259f117))
+* **observability:** log run completions and add health/stats endpoints ([569ab15](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/569ab156f320001f8836c2a885519b11c7f43935))
 * run the cover backfill over multiple concurrent FTP connections ([d179c9f](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/d179c9f2d1365c48125eb7a075c7cafa3a6158f6))
 
 
