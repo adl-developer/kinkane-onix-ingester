@@ -39,6 +39,27 @@ export const healthController = {
     });
   },
 
+  /**
+   * Catalogue counts. Admin-gated to match stats — it exposes business
+   * numbers (how large the catalogue is), and the aggregates are heavy
+   * enough that it shouldn't be open to unauthenticated polling.
+   */
+  async counts(_req: Request, res: Response): Promise<void> {
+    try {
+      const result = await healthService.counts();
+      res.status(200).json({
+        service: 'onix-ingester',
+        timestamp: new Date().toISOString(),
+        ...result,
+      });
+    } catch (err) {
+      logger.error('Health counts query failed', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+      res.status(500).json({ error: 'Failed to gather counts' });
+    }
+  },
+
   /** Run statistics. Admin-gated — exposes filenames and error messages. */
   async stats(req: Request, res: Response): Promise<void> {
     const parsed = statsQuerySchema.safeParse(req.query);

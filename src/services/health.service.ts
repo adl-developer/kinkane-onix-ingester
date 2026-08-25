@@ -263,6 +263,116 @@ async function queueStats() {
   return Object.fromEntries(entries);
 }
 
+/** Percentage helper — guards the empty-table case so we never divide by zero. */
+function pct(part: number, whole: number): number {
+  if (!whole) return 0;
+  return Math.round((part / whole) * 10000) / 100;
+}
+
+/**
+ * Catalogue size and enrichment coverage. This is the "what is actually in
+ * the tables" view that job/feed stats deliberately can't answer: a feed can
+ * be running perfectly and still be enriching nothing, and covers/excerpts
+ * write no fetch-log rows at all, so this is the only place a silent failure
+ * in either becomes visible.
+ *
+ * Cost note: these are unfiltered aggregates over the whole books table
+ * (~1.1M rows) plus a semi-join against book_excerpts, so expect a few
+ * hundred ms to low seconds. Deliberately kept out of readiness(), which is
+ * polled on a schedule and must stay cheap.
+ */
+async function counts() {
+  const [books] = await db.execute<{
+    total: number;
+    active: number;
+    removed: number;
+    with_cover: number;
+    with_isbn: number;
+    with_embedding: number;
+    gardners_cover_checked: number;
+    last_created_at: string | null;
+    last_updated_at: string | null;
+    last_cover_fetched_at: string | null;
+  }>(sql`
+    SELECT
+      COUNT(*)::int AS total,
+      COUNT(*) FILTER (WHERE is_removed = FALSE)::int AS active,
+      COUNT(*) FILTER (WHERE is_removed = TRUE)::int AS removed,
+      COUNT(*) FILTER (WHERE is_removed = FALSE AND cover_url IS NOT NULL)::int AS with_cover,
+      COUNT(*) FILTER (WHERE is_removed = FALSE AND isbn13 IS NOT NULL)::int AS with_isbn,
+      COUNT(*) FILTER (WHERE is_removed = FALSE AND embedding IS NOT NULL)::int AS with_embedding,
+      COUNT(*) FILTER (WHERE is_removed = FALSE AND gardners_cover_checked_at IS NOT NULL)::int
+        AS gardners_cover_checked,
+      MAX(created_at) AS last_created_at,
+      MAX(updated_at) AS last_updated_at,
+      MAX(cover_fetched_at) AS last_cover_fetched_at
+    FROM books
+  `);
+
+  const [excerpts] = await db.execute<{
+    total: number;
+    available: number;
+    last_fetched_at: string | null;
+    last_jb_updated_at: string | null;
+  }>(sql`
+    SELECT
+      COUNT(*)::int AS total,
+      COUNT(*) FILTER (WHERE available)::int AS available,
+      MAX(fetched_at) AS last_fetched_at,
+      MAX(jb_updated_at) AS last_jb_updated_at
+    FROM book_excerpts
+  `);
+
+  // Books that actually resolve to an excerpt — the number that matters.
+  // book_excerpts holds Jellybooks' whole catalogue, most of which is for
+  // ISBNs we don't carry, so its row count on its own overstates coverage.
+  const [matched] = await db.execute<{ books_with_excerpt: number }>(sql`
+    SELECT COUNT(*)::int AS books_with_excerpt
+    FROM books b
+    WHERE b.is_removed = FALSE
+      AND b.isbn13 IS NOT NULL
+      AND EXISTS (
+        SELECT 1 FROM book_excerpts e
+        WHERE e.isbn13 = b.isbn13 AND e.available
+      )
+  `);
+
+  const activeBooks = books?.active ?? 0;
+  const booksWithExcerpt = matched?.books_with_excerpt ?? 0;
+
+  return {
+    books: {
+      total: books?.total ?? 0,
+      active: activeBooks,
+      removed: books?.removed ?? 0,
+      withIsbn13: books?.with_isbn ?? 0,
+      lastCreatedAt: toIso(books?.last_created_at ?? null),
+      lastUpdatedAt: toIso(books?.last_updated_at ?? null),
+    },
+    covers: {
+      withCover: books?.with_cover ?? 0,
+      missingCover: activeBooks - (books?.with_cover ?? 0),
+      coveragePct: pct(books?.with_cover ?? 0, activeBooks),
+      gardnersChecked: books?.gardners_cover_checked ?? 0,
+      lastCoverFetchedAt: toIso(books?.last_cover_fetched_at ?? null),
+    },
+    excerpts: {
+      // Rows in book_excerpts — Jellybooks' catalogue, not our coverage.
+      totalRows: excerpts?.total ?? 0,
+      availableRows: excerpts?.available ?? 0,
+      booksWithExcerpt,
+      coveragePct: pct(booksWithExcerpt, activeBooks),
+      lastFetchedAt: toIso(excerpts?.last_fetched_at ?? null),
+      lastJellybooksUpdateAt: toIso(excerpts?.last_jb_updated_at ?? null),
+    },
+    embeddings: {
+      withEmbedding: books?.with_embedding ?? 0,
+      missingEmbedding: activeBooks - (books?.with_embedding ?? 0),
+      coveragePct: pct(books?.with_embedding ?? 0, activeBooks),
+    },
+  };
+}
+
 async function stats(options: { windowHours: number; failureLimit: number }) {
   const { windowHours, failureLimit } = options;
 
@@ -285,4 +395,4 @@ async function stats(options: { windowHours: number; failureLimit: number }) {
   };
 }
 
-export const healthService = { readiness, stats };
+export const healthService = { readiness, stats, counts };
