@@ -1,4 +1,4 @@
-# 1.0.0 (2026-08-25)
+# 1.0.0 (2026-09-29)
 
 
 ### Bug Fixes
@@ -36,10 +36,11 @@
 * **excerpts:** paginate the Jellybooks full sync and expose a manual trigger ([af1084c](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/af1084c2dbceaf03c53c329b4db87285fa21a95a))
 * extend admin token expiry from 30m to 72h ([98380cf](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/98380cf6435128659b0792a009321bbcc2d583de))
 * **gardners:** add POST /gardners/covers/backfill ([92be61c](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/92be61caa9ad396440ba7dbb2c7ac670fe16106f))
+* **genres:** maintain books.main_genre_id when a chunk rewrites a book's subjects ([591dacc](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/591daccd158e7026833ef951324da44e7f1a506b))
 * load the full catalogue from GARDBIB in /gardners/bootstrap ([b4353c0](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/b4353c0551211e0d8119eaace1b67ffdac0ec052))
 * make Google Books cover fallback a true last resort ([b355637](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/b355637bb381f5bffc47790ab26a39e57c10511b))
 * move chunk payloads from PostgreSQL JSONB to R2 object storage ([bcf2404](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/bcf240446d3f6b12fd6d8615110ca147a168afb0))
-* **observability:** add health/counts endpoint for catalogue coverage ([e076baf](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/e076bafc2a82a1d396a69405fabea5652259f117))
+* **observability:** add health/counts endpoint for catalogue coverage ([d43f691](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/d43f6919223e738c642887d81388f8fb9305fbd7))
 * **observability:** log run completions and add health/stats endpoints ([569ab15](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/569ab156f320001f8836c2a885519b11c7f43935))
 * run the cover backfill over multiple concurrent FTP connections ([d179c9f](https://adl.github.com/adl-developer/kinkane-onix-ingester/commit/d179c9f2d1365c48125eb7a075c7cafa3a6158f6))
 

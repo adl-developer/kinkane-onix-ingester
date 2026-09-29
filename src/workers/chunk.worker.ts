@@ -17,6 +17,7 @@ import {
   NewBookPrice,
 } from '../db/schema';
 import { embeddingService } from '../services/embedding.service';
+import { mainGenreService } from '../services/main-genre.service';
 import { storageService } from '../services/storage.service';
 import { OnixProduct } from '../types/onix';
 import { ChunkJobData, ChunkJobResult } from '../types/queue';
@@ -175,6 +176,8 @@ async function upsertRelations(bookId: number, book: OnixProduct): Promise<void>
       }
     }
   }
+
+  await mainGenreService.refreshForBooks([bookId]);
 }
 
 // Same net effect as calling upsertBook + upsertRelations once per book, but
@@ -373,6 +376,9 @@ async function batchUpsertChunkBooks(
       await db.insert(bookGenres).values(Array.from(uniquePairs.values())).onConflictDoNothing();
     }
   }
+
+  // After subjects and genres, since it reads both.
+  await mainGenreService.refreshForBooks(touchedBookIds);
 
   return { embeddingTargets };
 }
